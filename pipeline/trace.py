@@ -92,6 +92,8 @@ class Trace:
     hops: list[Hop] = field(default_factory=list)
 
     final_action: dict[str, Any] = field(default_factory=dict)   # {"tool": "...", "args": {...}}
+    all_actions: list[dict[str, Any]] = field(default_factory=list)  # EVERY tool call, in order —
+    # the security-relevant action can occur mid-run, not just last (confirmed by real traces).
     attack_succeeded: Optional[bool] = None                      # AgentDojo's formal check -> ASR
 
     counterfactual: Counterfactual = field(default_factory=Counterfactual)

@@ -1,4 +1,3 @@
-cat > README.md << 'EOF'
 # LaunderLens
 Measuring Label Integrity (LIS) in taint-tracking defences for multi-agent LLM systems.
 
