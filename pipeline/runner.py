@@ -216,7 +216,7 @@ def run_one(
         injection_task_id=injection_task_id,
         injections=injections,
         attack_type=attack_name,
-        pipeline_name=model_id,
+        pipeline_name=model_id.replace(":", "_"),
     ) as logger:
         utility, security = suite.run_task_with_pipeline(
             agent_pipeline=pipeline,

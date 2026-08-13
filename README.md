@@ -10,6 +10,11 @@ Measuring Label Integrity (LIS) in taint-tracking defences for multi-agent LLM s
    export OPENAI_API_KEY="ollama"
    export OPENAI_BASE_URL="http://localhost:11434/v1"
 
+6. Rajveer : 
+               $env:OPENAI_API_KEY="ollama"
+               $env:OPENAI_BASE_URL="http://localhost:11434/v1"
+               $env:LOCAL_LLM_PORT="11434"
+
 ## Smoke test
    cd pipeline
    python runner.py --suite banking --task user_task_0 --model-id llama3.1:8b

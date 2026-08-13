@@ -324,7 +324,7 @@ Examples:
     )
     ap.add_argument("--suite", default="banking")
     ap.add_argument("--task", default="user_task_0")
-    ap.add_argument("--model-id", default="qwen2.5:14b")
+    ap.add_argument("--model-id", default="llama3.1:8b")
     ap.add_argument("--attack", default="important_instructions")
     ap.add_argument("--injection-task", default=None,
                     help="AgentDojo injection task ID (default: suite's first one)")
