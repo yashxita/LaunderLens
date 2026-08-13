@@ -133,6 +133,8 @@ def run_one(
     attack_name: str | None = None,
     injection_task_id: str | None = None,
     custom_injections: dict | None = None,
+    seed: int = 0,
+    temperature: float = 0.0,
 ) -> str:
     """
     Run ONE user task; save a Trace; return the log path.
@@ -152,6 +154,8 @@ def run_one(
     cfg = RunConfig(
         model=model,
         model_id=model_id,
+        seed=seed,
+        temperature=temperature,
         suite=suite_name,
         user_task_id=task_id,
         injection_task_id=injection_task_id,
@@ -162,6 +166,7 @@ def run_one(
     trace = Trace(config=cfg)
 
     # 2) build the agent pipeline (local model, no defence)
+    # temperature=0.0 + fixed seed makes runs as deterministic as local models allow.
     pipeline = AgentPipeline.from_config(
         PipelineConfig(
             llm=model,
@@ -169,6 +174,7 @@ def run_one(
             defense=None,
             system_message_name=None,
             system_message=None,
+            temperature=temperature,
         )
     )
 
@@ -252,6 +258,10 @@ if __name__ == "__main__":
                      help="AgentDojo attack name, e.g. important_instructions (omit for a clean run)")
     ap.add_argument("--injection-task", default=None,
                      help="Which injection task to target (default: suite's first one)")
+    ap.add_argument("--seed", type=int, default=0,
+                     help="RNG seed for reproducibility (default: 0)")
+    ap.add_argument("--temperature", type=float, default=0.0,
+                     help="Sampling temperature (default: 0.0 for deterministic)")
     args = ap.parse_args()
 
     run_one(
@@ -262,4 +272,6 @@ if __name__ == "__main__":
         logs_dir=args.logs_dir,
         attack_name=args.attack,
         injection_task_id=args.injection_task,
+        seed=args.seed,
+        temperature=args.temperature,
     )
