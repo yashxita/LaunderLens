@@ -1,27 +1,36 @@
 """
-runner.py  —  the BRIDGE between AgentDojo and your lab notebook (Trace).
+runner.py  --  the BRIDGE between AgentDojo and your lab notebook (Trace).
 
 Plain-English idea
 ------------------
 AgentDojo can run one agent task, but it only hands back two yes/no results
 (did the task succeed? did the attack succeed?) and throws away the step-by-step
-story. This file runs one task AND captures that story — every message the agent
-produced — and writes it all into one Trace JSON file in logs/.
+story. This file runs one task AND captures that story -- every message the agent
+produced -- and writes it all into one Trace JSON file in logs/.
 
 For Phase 1 we run the simplest case: one banking task, no attack, no defence,
 using your local Ollama model. When it finishes, one real log file appears.
 
+QUERK FIX -- qwen2.5 inline tool-call format
+--------------------------------------------
+qwen2.5:14b (via Ollama) sometimes emits tool calls inline in the assistant
+message text as:  <function=tool_name>{"arg": "val"}\n```
+instead of populating the `tool_calls` array.  _all_actions() detects and
+parses both formats, so no runs are silently empty.
+
 Usage (from the LaunderLens repo root, with .venv active and Ollama running):
 
-    export OPENAI_API_KEY="ollama"
-    export LOCAL_LLM_PORT=11434
+    set OPENAI_API_KEY=ollama
+    set LOCAL_LLM_PORT=11434
     python pipeline/runner.py --suite banking --task user_task_0 --model-id qwen2.5:14b
 """
 
 from __future__ import annotations
 
 import os
+import re
 import sys
+import json
 import argparse
 import subprocess
 
@@ -36,6 +45,33 @@ from agentdojo.attacks.attack_registry import load_attack
 
 # our lab notebook (pipeline/trace.py)
 from trace import Trace, RunConfig, Hop
+
+
+# ---------------------------------------------------------------------------
+# Terminal output helpers  (keep all runner output consistent)
+# ---------------------------------------------------------------------------
+
+COL = {
+    "reset":  "\033[0m",
+    "bold":   "\033[1m",
+    "green":  "\033[32m",
+    "yellow": "\033[33m",
+    "red":    "\033[31m",
+    "cyan":   "\033[36m",
+    "grey":   "\033[90m",
+}
+
+
+def _c(text: str, *codes: str) -> str:
+    """Wrap text in ANSI colour codes."""
+    prefix = "".join(COL.get(c, "") for c in codes)
+    return f"{prefix}{text}{COL['reset']}"
+
+
+def _section(title: str) -> None:
+    print(f"\n{_c('-' * 62, 'grey')}")
+    print(f"  {_c(title, 'bold', 'cyan')}")
+    print(_c('-' * 62, 'grey'))
 
 
 def _git_commit() -> str:
@@ -70,12 +106,41 @@ def _extract_text(content) -> str:
     return str(content)
 
 
+# Regex that matches qwen2.5's inline tool-call format:
+#   <function=tool_name>{...json...}\n``` (or similar fence endings)
+_INLINE_TOOL_RE = re.compile(
+    r"<function=([\w.]+)>\s*([\s\S]*?)(?:```|$)",
+    re.MULTILINE,
+)
+
+
+def _parse_args(raw) -> dict:
+    """
+    Parse tool-call arguments that may arrive as:
+      * a plain dict (ideal case)
+      * a JSON string (some APIs encode args as a string)
+      * a JSON string with trailing markdown fences (qwen2.5 quirk:
+          '{"file_path": "bill.txt"}\\n```')
+    Returns an empty dict on failure rather than crashing.
+    """
+    if isinstance(raw, dict):
+        return raw
+    if not isinstance(raw, str):
+        return {}
+    # Strip markdown code fences and surrounding whitespace
+    cleaned = re.sub(r"```[a-z]*", "", raw).strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        return {}
+
+
 def _messages_to_hops(messages) -> list[Hop]:
     """
     Turn AgentDojo's captured message history into our Hop records.
 
     We record one Hop per message so the whole story is preserved. Trust labels /
-    screener fields stay empty here (no defence in Phase 1) — later phases fill them in.
+    screener fields stay empty here (no defence in Phase 1) -- later phases fill them in.
     """
     hops: list[Hop] = []
     for i, m in enumerate(messages):
@@ -95,29 +160,49 @@ def _messages_to_hops(messages) -> list[Hop]:
 def _all_actions(messages) -> list[dict]:
     """
     Return every tool call the agent made, in order, as clean {"tool","args"} dicts.
-    We need the FULL sequence — not just the last call — because the security-relevant
+    We need the FULL sequence -- not just the last call -- because the security-relevant
     action (e.g. a laundered payment) can happen mid-conversation, with the model doing
     unrelated things afterward (as seen in real traces: it sends the malicious payment,
     then fumbles around confusedly before giving up on the real task).
+
+    Two extraction paths:
+      1. Standard: tool_calls array on the message (proper OpenAI format).
+      2. Fallback: scan assistant text for qwen2.5's inline <function=name>{...} format
+         when tool_calls is absent or empty.  This fixes the all_actions=[] bug where
+         the model emits calls as text and the JSON parser (inside AgentDojo) can't
+         parse the trailing ``` fence, so the tool_calls array stays empty.
     """
     actions = []
     for m in messages:
+        # -- Path 1: standard tool_calls array ------------------------------
         tcs = m.get("tool_calls") or []
         for tc in tcs:
             if isinstance(tc, dict):
                 name = tc.get("function") or tc.get("name") or "unknown"
-                args = tc.get("args") or tc.get("arguments") or {}
+                raw_args = tc.get("args") or tc.get("arguments") or {}
             else:
                 name = getattr(tc, "function", getattr(tc, "name", "unknown"))
-                args = getattr(tc, "args", getattr(tc, "arguments", {}))
-            actions.append({"tool": str(name), "args": args})
+                raw_args = getattr(tc, "args", getattr(tc, "arguments", {}))
+            actions.append({"tool": str(name), "args": _parse_args(raw_args)})
+
+        # -- Path 2: fallback -- inline <function=name>{...} in assistant text --
+        # Only used when the tool_calls array is empty; avoids double-counting.
+        if not tcs and m.get("role") == "assistant":
+            text = _extract_text(m.get("content", ""))
+            for match in _INLINE_TOOL_RE.finditer(text):
+                tool_name = match.group(1)
+                raw_json  = match.group(2).strip()
+                parsed    = _parse_args(raw_json)
+                if tool_name and (parsed or raw_json):
+                    actions.append({"tool": tool_name, "args": parsed})
+
     return actions
 
 
 def _final_action(messages) -> dict:
     """
     Return the LAST tool call (kept for backward compatibility / quick summaries).
-    For LIS comparisons, prefer _all_actions() — the harmful action is not always last.
+    For LIS comparisons, prefer _all_actions() -- the harmful action is not always last.
     """
     actions = _all_actions(messages)
     return actions[-1] if actions else {}
@@ -141,10 +226,10 @@ def run_one(
 
     Three modes:
       1. Clean run: attack_name=None, custom_injections=None.
-      2. Attack run: attack_name="important_instructions" (etc.) — the named
+      2. Attack run: attack_name="important_instructions" (etc.) -- the named
          AgentDojo attack generates its own payload text.
       3. Counterfactual run: custom_injections={"injection_bill_text": "<filler text>"}
-         — WE supply the text (e.g. a neutral filler), bypassing the attack object
+         -- WE supply the text (e.g. a neutral filler), bypassing the attack object
          entirely. Requires injection_task_id so the environment still sets up the
          same injection slot(s); the attack_name field records "counterfactual" for
          provenance even though no BaseAttack object is used.
@@ -239,11 +324,21 @@ def run_one(
 
     # 6) save one JSON log
     path = trace.save(logs_dir=logs_dir)
-    print(f"\n[runner] task_completed={utility}  attack_succeeded={security}")
-    print(f"[runner] attack={attack_name or '(none)'}  injection_task={injection_task_id or '(none)'}")
-    print(f"[runner] hops recorded: {len(trace.hops)}")
-    print(f"[runner] final_action: {trace.final_action}")
-    print(f"[runner] saved log: {path}")
+
+    # -- Structured run summary ---------------------------------------------
+    utility_str  = _c("[+] completed", "green")  if utility  else _c("[x] incomplete", "red")
+    security_str = _c("[+] succeeded", "red")    if security else _c("[x] blocked",    "green")
+    actions_str  = str(len(all_actions)) if all_actions else _c("0  [!] none captured", "yellow")
+
+    print(f"\n  {'Task completed':<20} {utility_str}")
+    print(f"  {'Attack outcome':<20} {security_str}")
+    print(f"  {'Hops captured':<20} {len(trace.hops)}")
+    print(f"  {'Actions captured':<20} {actions_str}")
+    if all_actions:
+        print(f"  {'Final action':<20} {_c(all_actions[-1].get('tool', '?'), 'bold')}  "
+              f"{all_actions[-1].get('args', {})}")
+    print(f"  {'Log':<20} {_c(path, 'grey')}")
+
     return path
 
 
