@@ -294,13 +294,17 @@ def run_one(
     #    The pipeline finds this logger via a global stack and calls logger.log(messages),
     #    which populates logger.messages. TraceLogger needs a delegate that has a `logdir`
     #    attribute; OutputLogger(logdir=None) provides one without writing files.
+    # AgentDojo's TraceLogger emits a UserWarning when attack_type=None (counterfactual
+    # filler runs pass attack_name=None). Use the same label already stored in cfg.attack
+    # so the warning is silenced without altering any recorded metadata.
+    logger_attack_type = attack_name if attack_name is not None else cfg.attack
     with TraceLogger(
         delegate=OutputLogger(logdir=None),
         suite_name=suite_name,
         user_task_id=task_id,
         injection_task_id=injection_task_id,
         injections=injections,
-        attack_type=attack_name,
+        attack_type=logger_attack_type,
         pipeline_name=model_id.replace(":", "_"),
     ) as logger:
         utility, security = suite.run_task_with_pipeline(

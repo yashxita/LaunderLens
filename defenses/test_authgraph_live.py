@@ -62,6 +62,10 @@ def main():
     ap.add_argument("--clean-trace", required=True,
                     help="path to a CLEAN (no-attack) banking trace JSON from logs/")
     ap.add_argument("--model-id", default="qwen2.5:14b")
+    ap.add_argument("--use-ground-truth-plan", action="store_true",
+                    help="use the known-correct authorization plan instead of the LLM "
+                         "Planner (isolates the same-observation pollution vulnerability "
+                         "from Planner variability)")
     args = ap.parse_args()
 
     print("Loading clean trace:", args.clean_trace)
@@ -79,14 +83,25 @@ def main():
     ag = AuthGraph(llm=llm)
 
     user_prompt = next((h.output_text for h in trace.hops if h.agent_role == "user"), "")
-    print("Planner is generating the authorization graph (may take ~30s)...")
-    ag.setup(user_prompt, catalog)
+
+    suite_name = trace.config.suite or "banking"
+    task_id = trace.config.user_task_id or "user_task_0"
+
+    if args.use_ground_truth_plan:
+        print("Using GROUND-TRUTH authorization plan (bypassing LLM Planner)...")
+        found = ag.use_ground_truth_plan(suite_name, task_id)
+        if not found:
+            print("ERROR: no ground-truth plan for this suite/task. Falling back to LLM Planner.")
+            print("Planner is generating the authorization graph (may take ~30s)...")
+            ag.setup(user_prompt, catalog)
+    else:
+        print("Planner is generating the authorization graph (may take ~30s)...")
+        ag.setup(user_prompt, catalog)
 
     print()
-    print("=== AUTHORIZATION PLAN (what the Planner produced) ===")
+    print("=== AUTHORIZATION PLAN (what is being used) ===")
     if not ag.steps:
-        print("  !! Planner returned no steps — its JSON likely failed to parse.")
-        print("  (This is the expected fix-on-first-run point. Paste this output.)")
+        print("  !! No steps — Planner's JSON likely failed to parse.")
     for s in ag.steps:
         print(f"  step {s.step_index}: expect '{s.expected_tool}'  "
               f"policies={json.dumps(s.param_policies)}")

@@ -72,6 +72,10 @@ def main():
     ap.add_argument("--injection-task", default="injection_task_0")
     ap.add_argument("--skip-oracle", action="store_true",
                     help="only run AuthGraph labelling; skip the (slow) oracle re-runs")
+    ap.add_argument("--use-ground-truth-plan", action="store_true",
+                    help="use the known-correct authorization plan instead of the LLM "
+                         "Planner (isolates the same-observation pollution vulnerability "
+                         "from Planner variability)")
     args = ap.parse_args()
 
     print("Loading poisoned trace:", args.poisoned_trace)
@@ -80,12 +84,30 @@ def main():
     print()
 
     # ---- 1. Run live AuthGraph over the poisoned trace ----
-    print("Running live AuthGraph (real qwen Planner + Checker) over the poisoned trace...")
     catalog = banking_tool_catalog()
     llm = make_local_llm(model_id=args.model_id)
     ag = AuthGraph(llm=llm)
     user_prompt = next((h.output_text for h in trace.hops if h.agent_role == "user"), "")
-    ag.setup(user_prompt, catalog)
+
+    suite_name = trace.config.suite or "banking"
+    task_id = trace.config.user_task_id or "user_task_0"
+
+    if args.use_ground_truth_plan:
+        print("Using GROUND-TRUTH authorization plan (bypassing LLM Planner)...")
+        found = ag.use_ground_truth_plan(suite_name, task_id)
+        if not found:
+            print("ERROR: no ground-truth plan for this suite/task. Falling back to LLM Planner.")
+            ag.setup(user_prompt, catalog)
+        else:
+            # Also run the LLM Planner (separately) so we can compare what it WOULD produce.
+            print("\n  (Also running LLM Planner for comparison — this output is for reference only)")
+            ag_compare = AuthGraph(llm=llm)
+            ag_compare.setup(user_prompt, catalog)
+            print("  (End of LLM Planner comparison output)\n")
+    else:
+        print("Running live AuthGraph (real qwen Planner + Checker) over the poisoned trace...")
+        ag.setup(user_prompt, catalog)
+
     apply_defense_to_trace(trace, ag, tool_catalog=catalog)
 
     print("\n=== AUTHGRAPH DECISIONS ON THE POISONED TRACE ===")
@@ -111,8 +133,8 @@ def main():
     print("\nRunning the counterfactual oracle (3 filler re-runs) to get ground truth...")
     verdict = run_counterfactual_oracle(
         poisoned_trace=trace,
-        suite_name=trace.config.suite or "banking",
-        task_id=trace.config.user_task_id or "user_task_0",
+        suite_name=suite_name,
+        task_id=task_id,
         model_id=args.model_id,
         injection_task_id=trace.config.injection_task_id or args.injection_task,
         injection_key=args.injection_key,
