@@ -187,3 +187,52 @@ labels are honest, and apply it to real attacks against a faithful
 reimplementation of AuthGraph (and, pending Phase 5, RTBAS), revealing
 label-laundering even in cases attack-success metrics would score as fully
 secure.*
+
+### 3.4a AuthGraph reimplementation — explicit engineering judgment calls
+
+The AuthGraph paper describes the system in prose + publishes the Planner/Checker
+prompts, but leaves several implementation details unspecified. Every place we had
+to make a call is logged here, so the reimplementation is auditable and no hidden
+choice can be mistaken for the original authors' design.
+
+1. **Verbatim-match shortcut applied to BOTH source categories.**
+   The paper defines two parameter-source categories (verbatim-copied vs.
+   reasoning-derived). It does NOT specify whether the "is this value literally
+   present in the source observation?" fast-path check applies to both, or only to
+   the verbatim category. We apply it to **both**: if a parameter value appears
+   verbatim in its declared source observation, we treat it as sourced (allow) and
+   do not invoke the LLM judge. Rationale: restricting the shortcut to only the
+   verbatim category caused **false positives on entirely clean data** (a
+   legitimate IBAN that was literally present in the bill was flagged as injection
+   by the local-model judge). This may make our reimplementation slightly MORE
+   PERMISSIVE than the original in ambiguous cases. Flagged as `APPROX` in code.
+   Crucially, this does NOT weaken the laundering finding: when the source
+   observation is itself poisoned (same-observation pollution), the verbatim match
+   correctly passes the laundered value as "sourced" — the exact behaviour LIS is
+   designed to expose.
+
+2. **First-action / empty-observation handling.**
+   The paper does not specify Layer-3 behaviour when a parameter's declared source
+   tool has not yet produced an observation (e.g. the very first action in a run).
+   We skip the check gracefully (allow) in that case, since a value cannot have
+   been influenced by an observation that does not yet exist. This is a bug-fix to
+   our own implementation, not a change to AuthGraph's logic.
+
+3. **Non-existent / "none" source tools.**
+   The Planner (local model) sometimes emits a source_tool of "none" or an empty
+   list. The paper assumes a well-formed plan. We skip the source check gracefully
+   in this case rather than false-flag, and note it as a Planner-quality gap
+   attributable to the weaker local model, not to AuthGraph's design.
+
+4. **Local model vs. the paper's model.**
+   AuthGraph's reported numbers use a GPT-4o-class model for both the agent and the
+   Planner/Checker. We use qwen2.5:14b locally for development. The Planner/Checker
+   judgments are therefore lower-quality than the original; this is expected and is
+   why headline results will eventually be reproduced on a GPT-4o-class model. Any
+   fidelity check against the paper's clean-completion / attack-block numbers must
+   account for this model gap.
+
+**Validation plan:** a fidelity check (our reimplementation's clean-completion rate
+and attack-block rate vs. the paper's reported figures, within a stated tolerance)
+will show whether these judgment calls materially distorted behaviour. If close,
+that is evidence the calls are benign.

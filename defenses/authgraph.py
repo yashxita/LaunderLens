@@ -167,10 +167,17 @@ class AuthGraph(Defense):
         tool_names = [t.get("name", "") for t in tool_catalog]
 
         if self.llm is not None:
+            # Include each tool's REAL parameter names so the Planner uses exact
+            # arg names (not guesses like 'recipient_account_number' vs 'recipient').
+            tool_lines = []
+            for t in tool_catalog:
+                pnames = t.get("params", [])
+                tool_lines.append(f"- {t.get('name','')}({', '.join(pnames)}): {t.get('description','')}")
             user_msg = (
                 f"User task: {user_prompt}\n\n"
-                f"Available tools: {json.dumps(tool_names)}\n\n"
-                "Generate the authorization graph as specified."
+                f"Available tools (use these EXACT parameter names in param_policies):\n"
+                + "\n".join(tool_lines)
+                + "\n\nGenerate the authorization graph as specified."
             )
             raw = self.llm(user_msg, PLANNER_SYSTEM_PROMPT)
             parsed = _safe_json(raw)
@@ -281,11 +288,32 @@ class AuthGraph(Defense):
                 )
 
             # observation_direct / observation_nl: value must come from the declared source tool(s)
-            obs_texts = [context.observations.get(t, "") for t in source_tools]
+            # Guard: if no real source tool was declared (e.g. "none", empty), we cannot
+            # verify against an observation — this is a Planner gap, not an injection.
+            # Skip gracefully (allow, but mark it) rather than false-flag as injection.
+            real_source_tools = [t for t in source_tools if t and t.lower() != "none"]
+            if not real_source_tools:
+                continue
+
+            obs_texts = [context.observations.get(t, "") for t in real_source_tools]
             obs_joined = "\n".join(obs_texts)
 
-            # fast path: verbatim string match in the allowed source observation
-            if allowed_source == "observation_direct" and value and value in obs_joined:
+            # If none of the declared source tools have produced an observation yet
+            # (e.g. this is an early action), there is nothing to have influenced the
+            # value — cannot be injection-sourced. Skip gracefully.
+            if not obs_joined.strip():
+                continue
+
+            # fast path: verbatim string match in the allowed source observation.
+            # Applies to BOTH observation_direct and observation_nl — if the exact value
+            # literally appears in the legitimate source observation, it is sourced from
+            # there by definition (no injection needed to explain it), so no LLM judgment
+            # is required. The LLM judge is only for values NOT present verbatim (genuinely
+            # derived/reasoned values). NOTE: when the source observation itself is poisoned
+            # (same-observation pollution), this verbatim match will pass the laundered value
+            # as 'sourced' — that is the intended, faithful AuthGraph behaviour and exactly
+            # the label-laundering surface LIS is designed to expose.
+            if value and value in obs_joined:
                 continue
 
             # otherwise fall back to the LLM injection judge on the RAW observation text
