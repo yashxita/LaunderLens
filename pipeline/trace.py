@@ -99,6 +99,14 @@ class Trace:
     counterfactual: Counterfactual = field(default_factory=Counterfactual)
     screener_evaded: Optional[bool] = None                       # did the payload pass the screener? -> SER
 
+    # Defense decisions: one entry per action reviewed, written by apply_defense_to_trace.
+    # Each entry: {action_index, tool, allow, trust_label, screener_decision, layer, reason}
+    defense_decisions: list[dict[str, Any]] = field(default_factory=list)
+
+    # LIS verdict for this run (written by test_authgraph_stepC or batch runner).
+    # Values: "dishonest_label" | "honest_label" | "unusable" | None (not yet computed)
+    lis_verdict: Optional[str] = None
+
     notes: str = ""
 
     # ----- convenience methods -----

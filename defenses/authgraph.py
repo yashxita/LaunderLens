@@ -290,6 +290,7 @@ class AuthGraph(Defense):
         for s in self.steps:
             print(f"    step {s.step_index}: {s.expected_tool}  "
                   f"policies={json.dumps(s.param_policies)}")
+        self._plan_ready = True   # signal apply_defense_to_trace to skip re-planning
         return True
 
     # ---- per-action review (the 3-layer checker) ----

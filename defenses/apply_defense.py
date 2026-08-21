@@ -113,6 +113,7 @@ def apply_defense_to_trace(
     trace: Trace,
     defense: Defense,
     tool_catalog: list[dict] | None = None,
+    skip_setup: bool = False,
 ) -> Trace:
     """
     Replay the trace's actions through `defense`, writing each verdict back into
@@ -123,13 +124,18 @@ def apply_defense_to_trace(
       hop.screener_decision <- decision.screener_decision
       hop.screener_reason   <- decision.reason
     and also stash a compact per-action decision list in trace.notes-adjacent field.
+
+    skip_setup: if True, or if the defense already has a plan loaded (_plan_ready flag),
+                skip calling defense.setup() so a pre-loaded ground-truth plan is preserved.
     """
     tool_catalog = tool_catalog or []
     user_prompt = _user_prompt_from_trace(trace)
     observations = _observations_from_trace(trace)
 
-    # one-time planning (AuthGraph builds its authorization graph here)
-    defense.setup(user_prompt, tool_catalog)
+    # one-time planning — skip if caller says so OR if defense already has a plan loaded
+    _already_planned = getattr(defense, "_plan_ready", False)
+    if not skip_setup and not _already_planned:
+        defense.setup(user_prompt, tool_catalog)
 
     prior_actions: list[dict] = []
     action_decisions: list[dict] = []
@@ -165,20 +171,16 @@ def apply_defense_to_trace(
         })
         prior_actions.append(action)
 
-    # record the defence used + its decisions in the trace config/notes
+    # record the defence name in config; write decisions into the proper persisted field
     trace.config.defense = defense.name
-    trace.notes = (trace.notes or "") + f" | defense={defense.name} decisions={action_decisions}"
-    # also expose decisions as an attribute for downstream metrics (not saved by dataclass,
-    # but available in-memory; the notes copy is the persisted record)
-    trace.defense_decisions = action_decisions  # type: ignore[attr-defined]
+    trace.defense_decisions = action_decisions   # now a real dataclass field — serializes to JSON
 
     return trace
 
 
 def defense_blocked_attack(trace: Trace) -> bool:
     """True if the defence blocked at least one action (any allow=False)."""
-    decisions = getattr(trace, "defense_decisions", [])
-    return any(not d["allow"] for d in decisions)
+    return any(not d["allow"] for d in trace.defense_decisions)
 
 
 if __name__ == "__main__":
