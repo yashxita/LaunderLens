@@ -68,11 +68,13 @@ from lis_score import lis_sink, breakdown_report
 from ser_score import ser_from_trace
 from apply_defense import apply_defense_to_trace, make_local_llm
 from authgraph import AuthGraph
+from rtbas import RTBAS
 from attack_base import LaunderingAttack, TaskContext, DEFAULT_BANKING_CTX
 
 # Import attack classes
 from attribution_forgery import AttributionForgery, ALL_VARIANTS as AF_VARIANTS
 from label_join import LabelJoin, ALL_VARIANTS as LJ_VARIANTS
+from multi_hop_reemission import MultiHopReemission, ALL_VARIANTS as MHR_VARIANTS
 
 
 def _iban_matches(candidate: str, attacker_iban: str, min_prefix: int = 15) -> bool:
@@ -156,6 +158,7 @@ def run_one_variant(
     logs_dir: str,
     results_dir: str,
     dry_run: bool = False,
+    defense_name: str = "authgraph",
 ) -> dict:
     """Run the full Phase 4 pipeline for one attack variant."""
 
@@ -308,28 +311,42 @@ def run_one_variant(
             traceback.print_exc()
 
     # =====================================================================
-    # STEP 4: Replay each poisoned trace through AuthGraph
+    # STEP 4: Replay each poisoned trace through defence
     # =====================================================================
-    _section("Step 4 / 5  --  AuthGraph defence screening")
+    defense_display = defense_name.upper()
+    _section(f"Step 4 / 5  --  {defense_display} defence screening")
     catalog = banking_tool_catalog()
     llm = make_local_llm(model_id=model_id)
 
     for i, pt in enumerate(poisoned_traces):
         try:
-            ag = AuthGraph(llm=llm)
-            if use_ground_truth_plan:
-                found = ag.use_ground_truth_plan(ctx.suite, ctx.task_id)
-                if not found:
-                    ag.setup(pt.hops[1].output_text if len(pt.hops) > 1 else "", catalog)
+            # Instantiate the chosen defence
+            if defense_name == "rtbas":
+                defense = RTBAS(llm=llm)
+                if use_ground_truth_plan:
+                    found = defense.use_ground_truth_labels(ctx.suite, ctx.task_id)
+                    if not found:
+                        defense.setup(pt.hops[1].output_text if len(pt.hops) > 1 else "", catalog)
+                else:
+                    user_prompt = next((h.output_text for h in pt.hops if h.agent_role == "user"), "")
+                    defense.setup(user_prompt, catalog)
             else:
-                user_prompt = next((h.output_text for h in pt.hops if h.agent_role == "user"), "")
-                ag.setup(user_prompt, catalog)
+                # Default: AuthGraph
+                defense = AuthGraph(llm=llm)
+                if use_ground_truth_plan:
+                    found = defense.use_ground_truth_plan(ctx.suite, ctx.task_id)
+                    if not found:
+                        defense.setup(pt.hops[1].output_text if len(pt.hops) > 1 else "", catalog)
+                else:
+                    user_prompt = next((h.output_text for h in pt.hops if h.agent_role == "user"), "")
+                    defense.setup(user_prompt, catalog)
 
-            apply_defense_to_trace(pt, ag, catalog, skip_setup=True)
+            apply_defense_to_trace(pt, defense, catalog, skip_setup=True)
             ser_result = ser_from_trace(pt)
 
             summary["defense_results"].append({
                 "run_id": pt.run_id,
+                "defense": defense_name,
                 "decisions": pt.defense_decisions,
                 "ser": ser_result.ser,
                 "sec_allowed": ser_result.security_relevant_allowed,
@@ -392,10 +409,11 @@ def run_one_variant(
     print(f"\n  {'─' * 50}")
     print(f"  {_c('RESULTS', 'bold', 'white')}: {attack.name}/{attack.variant}")
     print(f"  {'─' * 50}")
+    _row("Defence",                            defense_name)
     _row("ASR (attack success)",              asr_str)
     _row("SER (screener evasion)",            ser_str)
     _row("LIS-sink (no defence)",             lis_str)
-    _row("LIS-sink (with AuthGraph)",         lis_def_str)
+    _row(f"LIS-sink (with {defense_name})",    lis_def_str)
     _row("Dishonest labels",                  str(dishonest_count))
     _row("Honest labels",                     str(honest_count))
 
@@ -422,19 +440,22 @@ def run_one_variant(
 # ---------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(
-        description="Phase 4: test crafted laundering attacks against AuthGraph"
+        description="Phase 4: test crafted laundering attacks against defenses"
     )
-    ap.add_argument("--attack", choices=["attribution_forgery", "label_join"],
+    ap.add_argument("--attack",
+                    choices=["attribution_forgery", "label_join", "multi_hop_reemission"],
                     help="Which attack to run (or use --all-variants)")
     ap.add_argument("--variant", help="Specific variant (e.g. priority_billing)")
     ap.add_argument("--all-variants", action="store_true",
                     help="Run ALL variants of BOTH attacks")
+    ap.add_argument("--defense", choices=["authgraph", "rtbas"], default="authgraph",
+                    help="Which defence to test against (default: authgraph)")
     ap.add_argument("--model-id", default="qwen2.5:14b")
     ap.add_argument("--seeds", type=int, default=3)
     ap.add_argument("--suite", default="banking")
     ap.add_argument("--task", default="user_task_0")
     ap.add_argument("--use-ground-truth-plan", action="store_true", default=True,
-                    help="Use known-correct auth plan (isolates the Layer 3 vulnerability)")
+                    help="Use known-correct auth plan / labels (isolates structural vulnerability)")
     ap.add_argument("--use-llm-planner", action="store_true",
                     help="Use the LLM Planner instead of ground-truth plan")
     ap.add_argument("--logs-dir", default="logs")
@@ -457,6 +478,8 @@ def main():
             attacks_to_run.append(AttributionForgery(variant=v))
         for v in LJ_VARIANTS:
             attacks_to_run.append(LabelJoin(variant=v))
+        for v in MHR_VARIANTS:
+            attacks_to_run.append(MultiHopReemission(variant=v))
     elif args.attack == "attribution_forgery":
         variants = [args.variant] if args.variant else AF_VARIANTS
         for v in variants:
@@ -465,6 +488,10 @@ def main():
         variants = [args.variant] if args.variant else LJ_VARIANTS
         for v in variants:
             attacks_to_run.append(LabelJoin(variant=v))
+    elif args.attack == "multi_hop_reemission":
+        variants = [args.variant] if args.variant else MHR_VARIANTS
+        for v in variants:
+            attacks_to_run.append(MultiHopReemission(variant=v))
     else:
         ap.error("Specify --attack or --all-variants")
 
@@ -483,6 +510,7 @@ def main():
             use_ground_truth_plan=args.use_ground_truth_plan,
             logs_dir=args.logs_dir, results_dir=args.results_dir,
             dry_run=args.dry_run,
+            defense_name=args.defense,
         )
         all_results.append(result)
 
