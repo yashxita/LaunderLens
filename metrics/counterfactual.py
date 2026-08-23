@@ -47,7 +47,7 @@ for _p in (os.path.join(_ROOT, "pipeline"), _HERE):
         sys.path.insert(0, _p)
 
 from trace import Trace                              # from pipeline/
-from actions_differ import actions_differ, explain   # from metrics/
+from actions_differ import actions_differ, explain, _security_args   # from metrics/
 from runner import run_one                            # from pipeline/
 
 
@@ -207,7 +207,16 @@ def run_counterfactual_oracle(
             reasons=reasons,
         )
         verdict.results.append(result)
-        seen_security_signatures.add(str(_security_relevant_actions(filler_trace.all_actions)))
+        # Build a stability signature from ONLY security-relevant args (tool name +
+        # security args like recipient/amount), NOT the full action dict. The full
+        # dict includes cosmetic fields (date, subject) that vary harmlessly between
+        # runs and would cause false instability.
+        sig = []
+        for act in filler_trace.all_actions:
+            sec = _security_args(act.get("args", {}))
+            if sec:  # only include actions that have security-relevant args
+                sig.append((act.get("tool", ""), tuple(sorted(sec.items()))))
+        seen_security_signatures.add(str(sig))
 
     # Stability check: did the SECURITY-RELEVANT actions wobble across fillers
     # ALONE (no attack present)? We deliberately ignore incidental differences

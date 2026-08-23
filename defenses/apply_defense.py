@@ -37,7 +37,7 @@ for _p in (os.path.join(_ROOT, "pipeline"), os.path.join(_ROOT, "defenses"), _HE
         sys.path.insert(0, _p)
 
 from trace import Trace, Hop                       # from pipeline/
-from base import Defense, DefenseContext, ActionDecision, NoDefense   # from defenses/
+from defense_base import Defense, DefenseContext, ActionDecision, NoDefense   # from defenses/
 
 
 # ---------------------------------------------------------------------------

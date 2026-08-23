@@ -62,7 +62,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from base import LaunderingAttack, TaskContext, DEFAULT_BANKING_CTX
+from attack_base import LaunderingAttack, TaskContext, DEFAULT_BANKING_CTX
 
 
 class LabelJoin(LaunderingAttack):

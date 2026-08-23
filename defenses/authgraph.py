@@ -43,7 +43,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from base import Defense, DefenseContext, ActionDecision
+from defense_base import Defense, DefenseContext, ActionDecision
 
 
 # ---------------------------------------------------------------------------
