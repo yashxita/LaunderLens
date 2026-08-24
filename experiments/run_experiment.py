@@ -319,6 +319,7 @@ def run_experiment(
             oracle_verdicts.append(verdict)
             summary["oracle_verdicts"].append({
                 "poisoned_run_id": verdict.poisoned_run_id,
+                "poisoned_all_actions": verdict.poisoned_all_actions,   # <-- ADDED: raw evidence
                 "usable_for_ground_truth": verdict.usable_for_ground_truth,
                 "stable_across_fillers": verdict.stable_across_fillers,
                 "payload_was_influential": verdict.payload_was_influential,
@@ -326,6 +327,7 @@ def run_experiment(
                 "filler_results": [
                     {
                         "filler_index": r.filler_index,
+                        "filler_all_actions": r.filler_all_actions,   # <-- ADDED: raw evidence
                         "action_differs_from_poisoned": r.action_differs_from_poisoned,
                         "action_differs_from_clean": r.action_differs_from_clean,
                         "reasons": r.reasons,

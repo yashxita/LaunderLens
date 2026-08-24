@@ -236,3 +236,39 @@ choice can be mistaken for the original authors' design.
 and attack-block rate vs. the paper's reported figures, within a stated tolerance)
 will show whether these judgment calls materially distorted behaviour. If close,
 that is evidence the calls are benign.
+
+### 3.6 RTBAS reimplementation — post-hoc replay vs. live masking (scope limitation)
+
+Unlike AuthGraph (genuinely a post-hoc trajectory auditor by design), the real
+RTBAS masks irrelevant regions BEFORE the agent generates its response — it can
+alter agent behavior by hiding content, not just block after the fact. Our
+reimplementation (`defenses/rtbas.py`) replays RTBAS's screening logic post-hoc
+over an already-generated (undefended) trace. This is valid for testing LABEL
+HONESTY (did RTBAS's screener correctly identify the untrusted region as
+relevant, given what the agent actually did?) but does NOT simulate RTBAS's
+live protective effect (the agent might never have attempted the harmful
+action had the region actually been masked before generation).
+
+Our ASR/dishonest-label numbers for RTBAS should be read as "would RTBAS's
+judgment have been honest, given this trace," not "would RTBAS have prevented
+this attack in live deployment." This asymmetry versus AuthGraph is a known,
+disclosed limitation of the reimplementation, not a claim about RTBAS's actual
+real-world effectiveness.
+
+### 3.7 Cross-defence comparative finding (AuthGraph vs. RTBAS)
+
+Across the full attack matrix (3 attacks × 3 variants, banking/user_task_0, n=1
+pilot), AuthGraph and RTBAS diverge sharply in label honesty despite facing
+identical attacks. AuthGraph's Layer 3 verbatim-match fast path lets every
+attacker-influenced payment through as "trusted" (LIS-sink-with-defence = 0.0
+across all influential cases). RTBAS's strict policy-check layer (untrusted
+region touching a high-integrity tool → block, no fast-path equivalent) caught
+every one of the same cases honestly (LIS-sink-with-defence = 1.0). This shows
+the vulnerability we found is a specific structural feature of AuthGraph's
+design (the verbatim same-observation shortcut), not a universal property of
+all declassification-style defences — a stronger, more precise claim than "LLM
+defences can be laundered" in general.
+
+Note: this reimplementation's RTBAS is post-hoc replay (§3.6 limitation) — its
+100% honesty here reflects correct LABEL judgment given the ground-truth
+integrity annotations, not a live-deployment guarantee.
