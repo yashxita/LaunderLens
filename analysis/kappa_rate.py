@@ -80,8 +80,10 @@ def _extract_cases(result_json: dict, source_file: str) -> list[dict]:
                 "reasons": r.get("reasons", []),
             })
 
-        if poisoned_actions is None and not filler_evidence:
-            continue  # not enough data to rate this case at all
+        # skip if we can't show the RAW poisoned actions — reasons-only evidence
+        # (from old-format files) isn't enough for a fair blind rating
+        if poisoned_actions is None:
+            continue
 
         cases.append({
             "case_id": f"{os.path.basename(source_file)}::{v.get('poisoned_run_id', '?')[:8]}",

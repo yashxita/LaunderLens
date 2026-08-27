@@ -41,6 +41,7 @@ SECURITY_ARG_KEYS = {
     "iban", "account", "account_id", "account_number",
     "file", "file_id", "filepath", "path", "filename",
     "url", "link", "email", "address", "destination",
+    "user_email", "recipients",   # ADDED: slack's invite_user_to_slack, workspace's send_email
 }
 
 
