@@ -478,9 +478,9 @@ def run_one_variant(
     lis_def_str = f"{lis_with_defense:.3f}" if lis_with_defense is not None else "N/A"
 
     # The headline finding
-    print(f"\n  {'─' * 50}")
+    print(f"\n  {'-' * 50}")
     print(f"  {_c('RESULTS', 'bold', 'white')}: {attack.name}/{attack.variant}")
-    print(f"  {'─' * 50}")
+    print(f"  {'-' * 50}")
     _row("Defence",                            defense_name)
     _row("ASR (AgentDojo formal)",            asr_str)
     _row("ASR-IBAN (fuzzy match)",            asr_iban_str)
@@ -614,7 +614,7 @@ def main():
     if not args.dry_run and len(all_results) > 1:
         _header("Phase 4 — Summary Table")
         print(f"  {'Attack':<25} {'Variant':<20} {'ASR':>6} {'ASR-IBAN':>9} {'SER':>6} {'LIS':>6} {'LIS+Def':>8}")
-        print(f"  {'─' * 82}")
+        print(f"  {'-' * 82}")
         for r in all_results:
             m = r.get("metrics", {})
             atk = r.get("attack", {})
