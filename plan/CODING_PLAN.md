@@ -98,12 +98,12 @@ This checkpoint is the whole point of the speed ordering: you learn if the idea 
 
 Add in this order, each strengthening the same finding:
 
-- [ ] `defenses/rtbas.py` — second defence (LM-judge + attention screener). Note: the attention attack needs the local open-weights model.
-- [ ] `attacks/multi_hop_reemission.py` and `attacks/attention_bypass.py`.
-- [ ] `metrics/literal_baseline.py` — deterministic literal-value detector → defines the residual class.
-- [ ] More AgentDojo suites (start banking → add workspace, travel, slack).
-- [ ] `defenses/fides.py`, `defenses/camel.py` as baselines (or wrap AgentDojo's if present) — for the utility/safety trade-off framing.
-- [ ] Full attack × defence × suite matrix via `experiments/run_matrix.py`.
+- [x] `defenses/rtbas.py` — second defence (LM-judge variant; attention screener §7.2 deliberately out of scope — see `paper/differentiation.md` §3.6a, requires infra never built and the paper reports comparable accuracy anyway).
+- [x] `attacks/multi_hop_reemission.py`. `attacks/attention_bypass.py` DROPPED (targets a screener that doesn't exist in this codebase — see §3.6a); RTBAS's real attack surface is covered by `label_join` instead, per §3.5.
+- [x] `metrics/literal_baseline.py` — deterministic literal-value detector → defines the residual class.
+- [x] More AgentDojo suites: banking (full matrix) + slack (2 variants × 2 defenses × n=3, confirmed 2026-08-28, third harm class: unauthorized access) done. Workspace attempted, paused on a model-capability limit (documented, not a defence finding) — see PROGRESS.md 2026-08-28 log.
+- [x] `defenses/fides.py`, `defenses/camel.py` as baselines — built 2026-08-28 from the papers' own formal definitions (arXiv:2505.23643, arXiv:2503.18813), mock-verified (Step A, 4/4 smoke tests each). Live fidelity check (Step B) in progress.
+- [x] Full attack × defence × suite matrix via `experiments/run_matrix.py` — banking + slack wired in (`SUITE_ATTACKS`/`SUITE_CTX`), verified via dry-run. Fides/CaMeL not yet added as matrix dimensions (only banking/slack × authgraph/rtbas currently in `ALL_DEFENSES`) — natural follow-up once Fides/CaMeL clear their live fidelity check.
 
 ---
 

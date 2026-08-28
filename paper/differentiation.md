@@ -255,6 +255,46 @@ this attack in live deployment." This asymmetry versus AuthGraph is a known,
 disclosed limitation of the reimplementation, not a claim about RTBAS's actual
 real-world effectiveness.
 
+### 3.6a Attention-based screener (§7.2) — explicitly out of scope, not a gap
+
+The coding plan originally scoped `attacks/attention_bypass.py` to target
+RTBAS's attention-based screener specifically (paper §7.2). `defenses/rtbas.py`
+itself documents (lines 9–12) that we deliberately do NOT reimplement that
+screener: it requires a trained LSTM classifier plus a local feature-extractor
+model (OPT-125m / Phi-3-Mini) that were never built, and the paper's own §8.3.2
+reports the two screeners "perform similarly on end-to-end benchmarks," with
+the LM-Judge variant (the one we DID implement) scoring HIGHER on detection
+accuracy (Table 2). Building `attention_bypass.py` would therefore target a
+mechanism that does not exist anywhere in this codebase — it was reconsidered
+and dropped as a deliberate scope decision (2026-08-28), not left undone by
+oversight. RTBAS's attack surface is fully covered here by `label_join`
+(targets the LM-Judge dependency screener's relevance/join judgment) as
+already stated in §3.5.
+
+### 3.6b Fides and CaMeL — second/third baseline defences (2026-08-28)
+
+Added `defenses/fides.py` (Costa et al., Microsoft, arXiv:2505.23643) and
+`defenses/camel.py` (Debenedetti et al., Google DeepMind, arXiv:2503.18813) as
+additional baselines, per the coding plan's Phase 5 "utility/safety trade-off"
+framing. Both grounded directly in the papers' own formal definitions/quotes
+(verified via the arXiv PDFs, not paraphrased from a secondary summary) —
+Fides's two-lattice (integrity × confidentiality) join-and-policy-abort
+algorithm (its Algorithm 4/6), and CaMeL's capability model (provenance +
+allowed-readers, Figure 6's policy-function pattern). Full APPROX/scope
+disclosures are in each file's module docstring; the shared theme across all
+four defences (AuthGraph, RTBAS, Fides, CaMeL) is the same: LaunderLens
+replays each defence's labelling/policy-check logic POST-HOC over an
+already-generated trace, which tests LABEL HONESTY but not any defence's live
+protective effect (masking/redaction before generation) — a disclosed
+asymmetry, not an oversight, consistent across all four.
+
+Both new defences currently have mock-LLM structural verification only
+(Step A, matching AuthGraph's own original confirmation stage) — `python
+defenses/fides.py` / `python defenses/camel.py` each pass 4/4 smoke tests. A
+live fidelity check against a real agent trace (Step B/C, matching AuthGraph's
+staged validation) is the natural next step before either feeds into headline
+results; see PROGRESS.md for live-run status as it lands.
+
 ### 3.7 Cross-defence comparative finding (AuthGraph vs. RTBAS)
 
 Across the full attack matrix (3 attacks × 3 variants, banking/user_task_0, n=1
@@ -272,3 +312,38 @@ defences can be laundered" in general.
 Note: this reimplementation's RTBAS is post-hoc replay (§3.6 limitation) — its
 100% honesty here reflects correct LABEL judgment given the ground-truth
 integrity annotations, not a live-deployment guarantee.
+
+### 3.8 Three-domain generalization (banking, workspace, slack) — 2026-08-28
+
+The core finding (AuthGraph launders attacker-influenced writes as "trusted";
+RTBAS's policy-check catches the same writes honestly) was found first on
+banking and could, on its own, be read as an artifact of one suite's tool
+shapes (`send_money`, IBANs). We deliberately tested it against two more
+AgentDojo suites, chosen for genuinely different tool shapes AND different
+harm classes, to argue the vulnerability is **structural to AuthGraph's Layer
+3 design**, not specific to a payment tool:
+
+| Suite     | Tool                    | Harm class              | Status |
+|-----------|-------------------------|--------------------------|--------|
+| banking   | `send_money`             | financial fraud (money redirected to attacker) | Confirmed live, n≥1 seed across all 9 attack/variant combinations, AuthGraph 0/9 honest, RTBAS 9/9 honest |
+| workspace | `send_email`             | data exfiltration (email redirected to attacker) | Paused, not a defence result — `qwen2.5:14b` fails to resolve the target file via `search_files_by_filename` before Phase 4 can even reach the write step (a model tool-use capability limit, not a defence/attack finding). Documented, deprioritized; code kept in place (additive, does not affect banking). |
+| slack     | `invite_user_to_slack`   | **unauthorized access** (attacker granted real workspace membership under a spoofed identity) | Confirmed live at seeds=3, both variants (`full_replacement`, `dual_contact`) × both defences: AuthGraph 0/6 honest (all 6 laundered as `trusted`/`param_ok`), RTBAS 6/6 honest (all correctly `BLOCK`ed as `untrusted`/`policy_check`) |
+
+**Why slack matters more than a second banking-shaped confirmation:** it is
+the first harm class that is neither financial nor data-confidentiality —
+granting Slack access is an *authorization* harm. The identical AuthGraph
+Layer-3 mechanism (verbatim/param-source match inside a same-observation-
+polluted page) laundered it exactly the same way, and RTBAS's untrusted-region
+policy check caught it the same way, with no suite-specific tuning to either
+defence's reimplementation. This is the strongest evidence in the current
+result set that the finding is about AuthGraph's *design*, not about banking's
+*content*.
+
+**Caveat:** slack is now confirmed at n=3 seeds per cell (2026-08-28, see
+PROGRESS.md log) with zero exceptions — AuthGraph 6/6 dishonest, RTBAS 6/6
+honest across both variants. Still a single task (`user_task_2`) within the
+suite, so broader task coverage remains the natural next generality check,
+not a gap in the current claim. Workspace remains a genuinely open question
+(blocked on model capability, not yet a defence finding either way) and
+should be described in the paper as a documented limitation of the
+local-model setup, not folded into the three-domain claim above.

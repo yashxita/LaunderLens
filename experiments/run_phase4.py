@@ -87,6 +87,8 @@ from ser_score import ser_from_trace
 from apply_defense import apply_defense_to_trace, make_local_llm
 from authgraph import AuthGraph
 from rtbas import RTBAS
+from fides import Fides
+from camel import CaMeL
 from attack_base import (
     LaunderingAttack, TaskContext,
     DEFAULT_BANKING_CTX, DEFAULT_WORKSPACE_CTX, DEFAULT_SLACK_CTX,
@@ -363,28 +365,29 @@ def run_one_variant(
     catalog = banking_tool_catalog()
     llm = make_local_llm(model_id=model_id)
 
+    # Each defence's (constructor, ground-truth-loader method name) — lets
+    # new defences (Fides, CaMeL) plug in without another if/elif branch.
+    defense_registry = {
+        "rtbas":    (RTBAS,   "use_ground_truth_labels"),
+        "authgraph": (AuthGraph, "use_ground_truth_plan"),
+        "fides":    (Fides,   "use_ground_truth_labels"),
+        "camel":    (CaMeL,   "use_ground_truth_provenance"),
+    }
+
     for i, pt in enumerate(poisoned_traces):
         try:
             # Instantiate the chosen defence
-            if defense_name == "rtbas":
-                defense = RTBAS(llm=llm)
-                if use_ground_truth_plan:
-                    found = defense.use_ground_truth_labels(ctx.suite, ctx.task_id)
-                    if not found:
-                        defense.setup(pt.hops[1].output_text if len(pt.hops) > 1 else "", catalog)
-                else:
-                    user_prompt = next((h.output_text for h in pt.hops if h.agent_role == "user"), "")
-                    defense.setup(user_prompt, catalog)
+            defense_cls, gt_method_name = defense_registry.get(
+                defense_name, (AuthGraph, "use_ground_truth_plan")
+            )
+            defense = defense_cls(llm=llm)
+            if use_ground_truth_plan:
+                found = getattr(defense, gt_method_name)(ctx.suite, ctx.task_id)
+                if not found:
+                    defense.setup(pt.hops[1].output_text if len(pt.hops) > 1 else "", catalog)
             else:
-                # Default: AuthGraph
-                defense = AuthGraph(llm=llm)
-                if use_ground_truth_plan:
-                    found = defense.use_ground_truth_plan(ctx.suite, ctx.task_id)
-                    if not found:
-                        defense.setup(pt.hops[1].output_text if len(pt.hops) > 1 else "", catalog)
-                else:
-                    user_prompt = next((h.output_text for h in pt.hops if h.agent_role == "user"), "")
-                    defense.setup(user_prompt, catalog)
+                user_prompt = next((h.output_text for h in pt.hops if h.agent_role == "user"), "")
+                defense.setup(user_prompt, catalog)
 
             apply_defense_to_trace(pt, defense, catalog, skip_setup=True)
             ser_result = ser_from_trace(pt)
@@ -522,7 +525,7 @@ def main():
     ap.add_argument("--variant", help="Specific variant (e.g. priority_billing)")
     ap.add_argument("--all-variants", action="store_true",
                     help="Run ALL variants of ALL attacks (banking only)")
-    ap.add_argument("--defense", choices=["authgraph", "rtbas"], default="authgraph",
+    ap.add_argument("--defense", choices=["authgraph", "rtbas", "fides", "camel"], default="authgraph",
                     help="Which defence to test against (default: authgraph)")
     ap.add_argument("--model-id", default="qwen2.5:14b")
     ap.add_argument("--seeds", type=int, default=3)

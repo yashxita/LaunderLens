@@ -52,11 +52,13 @@ for _p in (
         sys.path.insert(0, _p)
 
 # Import everything from the single-variant runner
+import copy                                        # noqa: E402
 from run_phase4 import run_one_variant            # noqa: E402
-from attack_base import DEFAULT_BANKING_CTX      # noqa: E402
+from attack_base import DEFAULT_BANKING_CTX, DEFAULT_SLACK_CTX  # noqa: E402
 from attribution_forgery import AttributionForgery, ALL_VARIANTS as AF_VARIANTS   # noqa
 from label_join import LabelJoin, ALL_VARIANTS as LJ_VARIANTS                     # noqa
 from multi_hop_reemission import MultiHopReemission, ALL_VARIANTS as MHR_VARIANTS # noqa
+from slack_attacks import SlackInviteRedirect, ALL_VARIANTS as SLACK_VARIANTS     # noqa
 from literal_baseline import LiteralBaseline                                      # noqa
 
 
@@ -64,11 +66,28 @@ from literal_baseline import LiteralBaseline                                    
 # Matrix dimensions
 # ---------------------------------------------------------------------------
 
+# Attacks are suite-specific (they target that suite's own tools), so the
+# matrix looks up which attacks apply per-suite rather than applying one
+# global attack list to every suite. ALL_ATTACKS is kept as the banking list
+# for backward compatibility with anything still importing it directly.
 ALL_ATTACKS = (
     [AttributionForgery(variant=v) for v in AF_VARIANTS] +
     [LabelJoin(variant=v)          for v in LJ_VARIANTS] +
     [MultiHopReemission(variant=v) for v in MHR_VARIANTS]
 )
+
+SUITE_ATTACKS: dict[str, list] = {
+    "banking": ALL_ATTACKS,
+    "slack":   [SlackInviteRedirect(variant=v) for v in SLACK_VARIANTS],
+}
+
+# Base TaskContext (injection_key/injection_task_id/attacker target, etc.) per
+# suite — each suite's real environment data differs (confirmed live for slack
+# on 2026-08-27/28: injection_key='injection_dora_0', task_id='user_task_2').
+SUITE_CTX = {
+    "banking": DEFAULT_BANKING_CTX,
+    "slack":   DEFAULT_SLACK_CTX,
+}
 
 ALL_DEFENSES = ["authgraph", "rtbas"]
 
@@ -130,17 +149,21 @@ def run_matrix(
     os.makedirs(results_dir, exist_ok=True)
     os.makedirs(logs_dir, exist_ok=True)
 
-    # Build full cell list
+    # Build full cell list (attacks are suite-specific: each suite only runs
+    # the attacks crafted for its own tools — see SUITE_ATTACKS)
     cells = []
     for suite, task in suites:
+        suite_attacks = SUITE_ATTACKS.get(suite, [])
         for defense in defenses:
-            for attack in ALL_ATTACKS:
+            for attack in suite_attacks:
                 cells.append((suite, task, defense, attack))
 
+    n_attack_variants = sum(len(SUITE_ATTACKS.get(s, [])) for s, _ in suites)
     _header(
         "LaunderLens — Full Matrix Run",
         f"{len(cells)} cells  "
-        f"({len(ALL_ATTACKS)} attacks × {len(defenses)} defense(s) × {len(suites)} suite(s))"
+        f"({n_attack_variants} attack variant(s) across {len(suites)} suite(s) "
+        f"× {len(defenses)} defense(s))"
     )
     print(f"\n  Defenses : {', '.join(defenses)}")
     print(f"  Suites   : {', '.join(f'{s}/{t}' for s, t in suites)}")
@@ -150,7 +173,7 @@ def run_matrix(
         print(f"\n  {_c('DRY RUN — no model calls will be made', 'yellow')}")
 
     print(f"\n  {'#':<4} {'Suite':<10} {'Defense':<12} {'Attack':<25} {'Variant':<22}")
-    print(f"  {'─' * 76}")
+    print(f"  {'-' * 76}")
     for i, (suite, task, defense, attack) in enumerate(cells, 1):
         cid = _cell_id(attack.name, attack.variant, defense, suite, task)
         exists = os.path.exists(_result_path(results_dir, cid))
@@ -181,7 +204,10 @@ def run_matrix(
               f"vs  {_c(defense, 'cyan')}  "
               f"on  {suite}/{task}")
 
-        ctx = DEFAULT_BANKING_CTX
+        # Never mutate the shared DEFAULT_*_CTX singletons directly — that
+        # would corrupt them for later cells in the same process (the same
+        # class of bug run_phase4.py's main() already guards against).
+        ctx = copy.deepcopy(SUITE_CTX.get(suite, DEFAULT_BANKING_CTX))
         ctx.suite   = suite
         ctx.task_id = task
 
@@ -223,7 +249,7 @@ def print_matrix_table(results: list[dict]) -> None:
     hdr = (f"  {'Attack':<22} {'Variant':<20} {'Defense':<11} "
            f"{'Suite':<9} {'ASR':>6} {'SER':>6} {'LIS':>6} {'LIS+D':>7}")
     print(hdr)
-    print(f"  {'─' * 87}")
+    print(f"  {'-' * 87}")
 
     for r in results:
         if "error" in r:
@@ -302,7 +328,10 @@ def main() -> None:
         "banking":   ("banking",   "user_task_0"),
         "workspace": ("workspace", "user_task_0"),
         "travel":    ("travel",    "user_task_0"),
-        "slack":     ("slack",     "user_task_0"),
+        # slack's real task is user_task_2 ("Invite Dora to Slack...") —
+        # confirmed against agentdojo's own environment/injection data on
+        # 2026-08-27; user_task_0 does not exist for this suite.
+        "slack":     ("slack",     DEFAULT_SLACK_CTX.task_id),
     }
     suites = [suite_map.get(s, (s, "user_task_0")) for s in args.suites]
 
