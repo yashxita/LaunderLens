@@ -59,6 +59,9 @@ from attribution_forgery import AttributionForgery, ALL_VARIANTS as AF_VARIANTS 
 from label_join import LabelJoin, ALL_VARIANTS as LJ_VARIANTS                     # noqa
 from multi_hop_reemission import MultiHopReemission, ALL_VARIANTS as MHR_VARIANTS # noqa
 from slack_attacks import SlackInviteRedirect, ALL_VARIANTS as SLACK_VARIANTS     # noqa
+from rtbas_attacks import (JudgeHijack, SourceConfusion, RegionSpoof,             # noqa
+                           ALL_JUDGE_HIJACK_VARIANTS, ALL_SOURCE_CONFUSION_VARIANTS,  # noqa
+                           ALL_REGION_SPOOF_VARIANTS)                              # noqa
 from literal_baseline import LiteralBaseline                                      # noqa
 
 
@@ -70,11 +73,22 @@ from literal_baseline import LiteralBaseline                                    
 # matrix looks up which attacks apply per-suite rather than applying one
 # global attack list to every suite. ALL_ATTACKS is kept as the banking list
 # for backward compatibility with anything still importing it directly.
-ALL_ATTACKS = (
+# AuthGraph-targeted attacks (the original 9 variants)
+AUTHGRAPH_ATTACKS = (
     [AttributionForgery(variant=v) for v in AF_VARIANTS] +
     [LabelJoin(variant=v)          for v in LJ_VARIANTS] +
     [MultiHopReemission(variant=v) for v in MHR_VARIANTS]
 )
+
+# RTBAS-targeted attacks (6 new variants: 3 strategies × 2 each)
+RTBAS_ATTACKS = (
+    [JudgeHijack(variant=v)     for v in ALL_JUDGE_HIJACK_VARIANTS] +
+    [SourceConfusion(variant=v) for v in ALL_SOURCE_CONFUSION_VARIANTS] +
+    [RegionSpoof(variant=v)     for v in ALL_REGION_SPOOF_VARIANTS]
+)
+
+# ALL_ATTACKS includes everything for the banking suite
+ALL_ATTACKS = AUTHGRAPH_ATTACKS + RTBAS_ATTACKS
 
 SUITE_ATTACKS: dict[str, list] = {
     "banking": ALL_ATTACKS,

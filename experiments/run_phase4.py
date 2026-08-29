@@ -209,7 +209,13 @@ def run_one_variant(
 ) -> dict:
     """Run the full Phase 4 pipeline for one attack variant."""
 
-    fillers = DEFAULT_FILLERS
+    # Use attack-specific bill fillers if the attack provides them (e.g.,
+    # attribution_forgery, rtbas_attacks). This ensures the counterfactual
+    # oracle compares bill-vs-bill, not bill-vs-generic-blurb.
+    if hasattr(attack, "bill_fillers"):
+        fillers = attack.bill_fillers(ctx)
+    else:
+        fillers = DEFAULT_FILLERS
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     experiment_id = f"phase4_{attack.name}_{attack.variant}_{timestamp}"
     total_runs = 1 + n_seeds + (n_seeds * len(fillers))
