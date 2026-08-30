@@ -106,6 +106,11 @@ from rtbas_attacks import (
     SourceConfusion, ALL_SOURCE_CONFUSION_VARIANTS,
     RegionSpoof, ALL_REGION_SPOOF_VARIANTS
 )
+from structural_attacks import (
+    TrustedToolLaundering, ALL_TOOL_LAUNDERING_VARIANTS,
+    SemanticIndirection, ALL_SEMANTIC_INDIRECTION_VARIANTS,
+    ProvenanceDilution, ALL_PROVENANCE_DILUTION_VARIANTS,
+)
 
 def _iban_matches(candidate: str, attacker_iban: str, min_prefix: int = 15) -> bool:
     """
@@ -531,7 +536,9 @@ def main():
     ap.add_argument("--attack",
                     choices=["attribution_forgery", "label_join", "multi_hop_reemission",
                              "workspace_email_redirect", "slack_invite_redirect",
-                             "judge_hijack", "source_confusion", "region_spoof"],
+                             "judge_hijack", "source_confusion", "region_spoof",
+                             "trusted_tool_laundering", "semantic_indirection",
+                             "provenance_dilution"],
                     help="Which attack to run (or use --all-variants)")
     ap.add_argument("--variant", help="Specific variant (e.g. priority_billing)")
     ap.add_argument("--all-variants", action="store_true",
@@ -614,6 +621,18 @@ def main():
         variants = [args.variant] if args.variant else ALL_REGION_SPOOF_VARIANTS
         for v in variants:
             attacks_to_run.append(RegionSpoof(variant=v))
+    elif args.attack == "trusted_tool_laundering":
+        variants = [args.variant] if args.variant else ALL_TOOL_LAUNDERING_VARIANTS
+        for v in variants:
+            attacks_to_run.append(TrustedToolLaundering(variant=v))
+    elif args.attack == "semantic_indirection":
+        variants = [args.variant] if args.variant else ALL_SEMANTIC_INDIRECTION_VARIANTS
+        for v in variants:
+            attacks_to_run.append(SemanticIndirection(variant=v))
+    elif args.attack == "provenance_dilution":
+        variants = [args.variant] if args.variant else ALL_PROVENANCE_DILUTION_VARIANTS
+        for v in variants:
+            attacks_to_run.append(ProvenanceDilution(variant=v))
     else:
         ap.error("Specify --attack or --all-variants")
 
