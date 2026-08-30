@@ -42,13 +42,13 @@ Usage
     export LOCAL_LLM_PORT=11434
 
     # Test one attack variant (banking):
-    python experiments/run_phase4.py \\
-        --attack attribution_forgery --variant priority_billing \\
+    python experiments/run_phase4.py \
+        --attack attribution_forgery --variant priority_billing \
         --model-id qwen2.5:14b --seeds 3
 
     # Test a slack attack:
-    python experiments/run_phase4.py \\
-        --attack slack_invite_redirect --variant full_replacement \\
+    python experiments/run_phase4.py \
+        --attack slack_invite_redirect --variant full_replacement \
         --defense authgraph --seeds 1
 
     # Test all variants of all banking attacks:
@@ -101,7 +101,11 @@ from label_join import LabelJoin, ALL_VARIANTS as LJ_VARIANTS
 from multi_hop_reemission import MultiHopReemission, ALL_VARIANTS as MHR_VARIANTS
 from workspace_attacks import WorkspaceEmailRedirect, ALL_VARIANTS as WS_VARIANTS
 from slack_attacks import SlackInviteRedirect, ALL_VARIANTS as SLACK_VARIANTS
-
+from rtbas_attacks import (
+    JudgeHijack, ALL_JUDGE_HIJACK_VARIANTS,
+    SourceConfusion, ALL_SOURCE_CONFUSION_VARIANTS,
+    RegionSpoof, ALL_REGION_SPOOF_VARIANTS
+)
 
 def _iban_matches(candidate: str, attacker_iban: str, min_prefix: int = 15) -> bool:
     """
@@ -526,7 +530,8 @@ def main():
     )
     ap.add_argument("--attack",
                     choices=["attribution_forgery", "label_join", "multi_hop_reemission",
-                             "workspace_email_redirect", "slack_invite_redirect"],
+                             "workspace_email_redirect", "slack_invite_redirect",
+                             "judge_hijack", "source_confusion", "region_spoof"],
                     help="Which attack to run (or use --all-variants)")
     ap.add_argument("--variant", help="Specific variant (e.g. priority_billing)")
     ap.add_argument("--all-variants", action="store_true",
@@ -597,6 +602,18 @@ def main():
         variants = [args.variant] if args.variant else MHR_VARIANTS
         for v in variants:
             attacks_to_run.append(MultiHopReemission(variant=v))
+    elif args.attack == "judge_hijack":
+        variants = [args.variant] if args.variant else ALL_JUDGE_HIJACK_VARIANTS
+        for v in variants:
+            attacks_to_run.append(JudgeHijack(variant=v))
+    elif args.attack == "source_confusion":
+        variants = [args.variant] if args.variant else ALL_SOURCE_CONFUSION_VARIANTS
+        for v in variants:
+            attacks_to_run.append(SourceConfusion(variant=v))
+    elif args.attack == "region_spoof":
+        variants = [args.variant] if args.variant else ALL_REGION_SPOOF_VARIANTS
+        for v in variants:
+            attacks_to_run.append(RegionSpoof(variant=v))
     else:
         ap.error("Specify --attack or --all-variants")
 
