@@ -103,7 +103,7 @@ SUITE_CTX = {
     "slack":   DEFAULT_SLACK_CTX,
 }
 
-ALL_DEFENSES = ["authgraph", "rtbas"]
+ALL_DEFENSES = ["authgraph", "rtbas", "fides", "camel"]
 
 # Suites: each entry is (suite_name, task_id).
 # Add more rows here as you expand beyond banking.
@@ -313,7 +313,7 @@ def main() -> None:
         description="LaunderLens: run full Attack x Defense x Suite matrix"
     )
     ap.add_argument("--defenses", nargs="+",
-                    choices=["authgraph", "rtbas"],
+                    choices=["authgraph", "rtbas", "fides", "camel"],
                     default=ALL_DEFENSES,
                     help="Which defenses to include (default: all)")
     ap.add_argument("--suites", nargs="+",

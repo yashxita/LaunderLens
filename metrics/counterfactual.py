@@ -78,6 +78,149 @@ DEFAULT_FILLERS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Suite-sampled fillers (Stage 3.2 of CLOSURE_PLAN.md).
+#
+# The locked policy prefers text sampled from the suite's own environment data
+# over the hand-written DEFAULT_FILLERS above.  This function tries to pull
+# benign text from the AgentDojo suite (e.g. real file contents, real webpage
+# text, tool descriptions) and filter it to passages that satisfy the filler
+# policy:  ≥30 tokens, no imperatives, no 2nd-person instructions, no
+# accounts/amounts/URLs.
+#
+# Falls back to DEFAULT_FILLERS if AgentDojo is unavailable or the suite
+# doesn't yield enough qualifying passages.
+# ---------------------------------------------------------------------------
+import re as _re
+
+
+def _is_benign_passage(text: str) -> bool:
+    """
+    Check whether a passage satisfies the locked filler policy:
+      - no imperatives / 2nd-person instructions
+      - no accounts, IBANs, amounts, URLs, email addresses
+      - ≥30 whitespace-separated tokens
+    """
+    tokens = text.split()
+    if len(tokens) < 30:
+        return False
+
+    lower = text.lower()
+
+    # reject imperatives / 2nd-person
+    imperative_markers = [
+        "please ", "you must", "you should", "you need", "do the following",
+        "send a ", "transfer ", "pay ", "execute ", "perform ", "click ",
+        "navigate to", "go to ", "open ", "run ", "install ",
+    ]
+    if any(m in lower for m in imperative_markers):
+        return False
+
+    # reject accounts / financial values / URLs / emails
+    if _re.search(r'\b[A-Z]{2}\d{10,}\b', text):          # IBAN-like
+        return False
+    if _re.search(r'\$\d+', text):                          # dollar amounts
+        return False
+    if _re.search(r'https?://', lower):                     # URLs
+        return False
+    if _re.search(r'\S+@\S+\.\S+', text):                  # email addresses
+        return False
+
+    return True
+
+
+def _extract_environment_texts(suite_name: str) -> list[str]:
+    """
+    Pull candidate text passages from a suite's environment data.
+
+    Different suites store their benign data in different places:
+    - banking: file contents (bills, statements)
+    - slack: channel messages, user profiles
+    - workspace: document contents, calendar entries
+
+    We try to get the environment's string data and split it into passages.
+    """
+    try:
+        from agentdojo.task_suite.load_suites import get_suite
+        suite = get_suite("v1", suite_name)
+    except Exception:
+        return []
+
+    texts: list[str] = []
+
+    # Method 1: iterate over the suite's environment data
+    # AgentDojo suites expose environment via suite.load_and_inject_default_environment()
+    try:
+        env = suite.load_and_inject_default_environment({})
+        # Walk all string attributes of the environment's data objects
+        for attr_name in dir(env):
+            if attr_name.startswith("_"):
+                continue
+            attr = getattr(env, attr_name, None)
+            if isinstance(attr, str) and len(attr) > 50:
+                texts.append(attr)
+            elif isinstance(attr, list):
+                for item in attr:
+                    if isinstance(item, str) and len(item) > 50:
+                        texts.append(item)
+                    elif hasattr(item, "__dict__"):
+                        for v in vars(item).values():
+                            if isinstance(v, str) and len(v) > 50:
+                                texts.append(v)
+    except Exception:
+        pass
+
+    # Method 2: tool descriptions (always available, guaranteed benign)
+    try:
+        for t in suite.tools:
+            desc = str(getattr(t, "description", ""))
+            if len(desc) > 50:
+                texts.append(desc)
+    except Exception:
+        pass
+
+    return texts
+
+
+def suite_fillers(suite_name: str, n: int = 3) -> list[str]:
+    """
+    Return n filler passages sampled from the suite's own environment data.
+
+    If the suite doesn't yield enough qualifying passages, falls back to
+    DEFAULT_FILLERS (the hand-written ones).
+
+    This implements Stage 3.2 of CLOSURE_PLAN.md: "swap DEFAULT_FILLERS for
+    text sampled from the suite's own environment data".
+    """
+    candidates = _extract_environment_texts(suite_name)
+
+    # Filter to passages that satisfy the filler policy
+    qualified: list[str] = []
+    for text in candidates:
+        # Split long texts into paragraph-sized chunks
+        paragraphs = text.split("\n\n")
+        for para in paragraphs:
+            para = para.strip()
+            if _is_benign_passage(para):
+                qualified.append(para)
+
+    if len(qualified) < n:
+        # Not enough qualifying passages — fall back to hand-written fillers
+        return DEFAULT_FILLERS[:n]
+
+    # Take the first n distinct qualifying passages
+    seen: set[str] = set()
+    selected: list[str] = []
+    for q in qualified:
+        if q not in seen:
+            seen.add(q)
+            selected.append(q)
+            if len(selected) == n:
+                break
+
+    return selected if len(selected) == n else DEFAULT_FILLERS[:n]
+
+
 @dataclass
 class CounterfactualResult:
     """One completed comparison: poisoned run vs. one filler-substituted re-run."""
