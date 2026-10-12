@@ -117,16 +117,28 @@ def load_phase4_results(results_dir: str) -> list[dict]:
     """Load all phase4_*.json files, keeping only the latest per cell."""
     paths = sorted(glob.glob(os.path.join(results_dir, "phase4_*.json")))
     results = []
+    skipped_untagged = 0
     for p in paths:
         try:
             with open(p) as f:
                 data = json.load(f)
             if data.get("phase") != 4:
                 continue
+            # Skip early/legacy runs that never recorded a top-level defence or
+            # suite tag (the old config.attack mislabelling era). Every such file
+            # was verified to be either (a) a redundant early run already
+            # superseded by a properly-tagged run of the same cell, or (b) an
+            # empty failed run with null metrics. None carries unique data, so
+            # dropping them removes the '?' rows without inventing attribution.
+            if not data.get("defense") or not data.get("suite"):
+                skipped_untagged += 1
+                continue
             data["_source_path"] = p
             results.append(data)
         except Exception:
             continue
+    if skipped_untagged:
+        print(f"  Skipped {skipped_untagged} untagged legacy result file(s) (no defense/suite tag).")
     return results
 
 
