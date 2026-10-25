@@ -49,6 +49,7 @@ for _p in (os.path.join(_ROOT, "metrics"),):
         sys.path.insert(0, _p)
 
 from actions_differ import actions_differ, SECURITY_ARG_KEYS
+from influence import apply_sink_rule
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +245,7 @@ def headline_stats(paths: list[str]) -> None:
 
         if data.get("phase") != 4:
             continue
+        data = apply_sink_rule(data)  # sink-only influence rule (metrics/influence.py)
 
         metrics = extract_metrics(data)
         key = (metrics["defense"], metrics["suite"])

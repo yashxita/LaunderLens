@@ -46,6 +46,7 @@ for _p in (os.path.join(_ROOT, "metrics"),):
         sys.path.insert(0, _p)
 
 from actions_differ import actions_differ, SECURITY_ARG_KEYS  # suite-generic, already tested 9/9
+from influence import apply_sink_rule
 
 
 def _is_security_relevant(action: dict) -> bool:
@@ -159,6 +160,7 @@ def main():
             continue
         if data.get("phase") != 4:
             continue  # skip non-phase4 files silently
+        data = apply_sink_rule(data)  # sink-only influence rule (metrics/influence.py)
         r = rescore_one(data, p)
         rows.append(r)
         lisd = f"{r['lis_with_defense']:.3f}" if r["lis_with_defense"] is not None else "N/A"

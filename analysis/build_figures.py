@@ -33,6 +33,7 @@ for _p in (os.path.join(_ROOT, "metrics"),):
         sys.path.insert(0, _p)
 
 from actions_differ import actions_differ, SECURITY_ARG_KEYS
+from influence import apply_sink_rule
 
 # Import matplotlib with non-interactive backend (works headless on lab machines)
 import matplotlib
@@ -145,6 +146,7 @@ def load_phase4_latest(results_dir: str) -> list[dict]:
                 data = json.load(f)
             if data.get("phase") != 4:
                 continue
+            data = apply_sink_rule(data)  # sink-only influence rule (metrics/influence.py)
             atk = data.get("attack", {})
             key = (atk.get("name"), atk.get("variant"), data.get("defense"), data.get("suite"))
             existing = by_cell.get(key)

@@ -45,6 +45,9 @@ import argparse
 from dataclasses import dataclass, field
 from typing import Optional
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "metrics"))
+from influence import rederive_verdict  # sink-only influence rule (metrics/influence.py)
+
 RATINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kappa_ratings.json")
 
 
@@ -66,8 +69,8 @@ def _extract_cases(result_json: dict, source_file: str) -> list[dict]:
             continue  # can't rate a failed run
 
         # normalise field names across the two formats
-        usable = v.get("usable_for_ground_truth", v.get("usable"))
-        influential = v.get("payload_was_influential", v.get("influential"))
+        # verdict under the sink-only rule; old-format verdicts are kept as stored
+        usable, influential, _ = rederive_verdict(v)
         poisoned_actions = v.get("poisoned_all_actions")
 
         # filler evidence: run_experiment.py has rich filler_results;

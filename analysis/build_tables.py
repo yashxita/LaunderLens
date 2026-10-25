@@ -32,6 +32,7 @@ for _p in (os.path.join(_ROOT, "metrics"),):
         sys.path.insert(0, _p)
 
 from actions_differ import actions_differ, SECURITY_ARG_KEYS
+from influence import apply_sink_rule
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +134,8 @@ def load_phase4_results(results_dir: str) -> list[dict]:
             if not data.get("defense") or not data.get("suite"):
                 skipped_untagged += 1
                 continue
+            # Every reported number uses the sink-only influence rule (metrics/influence.py).
+            data = apply_sink_rule(data)
             data["_source_path"] = p
             results.append(data)
         except Exception:
