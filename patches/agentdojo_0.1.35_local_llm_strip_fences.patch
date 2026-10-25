@@ -1,0 +1,14 @@
+--- a/agentdojo/agent_pipeline/llms/local_llm.py
++++ b/agentdojo/agent_pipeline/llms/local_llm.py
+@@ -133,6 +133,11 @@
+     end_idx = completion.find(close_tag, start_idx)
+     end_idx = end_idx if end_idx != -1 else len(completion)
+     raw_json = completion[start_idx:end_idx].strip()
++    # LaunderLens patch: qwen2.5 often omits </function> and follows the JSON with a
++    # Markdown code fence, so the captured text ends in ``` and json.loads fails.
++    # Strip surrounding code fences before parsing.
++    raw_json = re.sub(r"^```(?:json)?\s*", "", raw_json)
++    raw_json = re.sub(r"\s*```.*$", "", raw_json, flags=re.S).strip()
+ 
+     try:
+         params_dict = json.loads(raw_json)
