@@ -5,7 +5,7 @@ Measuring Label Integrity (LIS) in taint-tracking defences for multi-agent LLM s
 1. git clone https://github.com/yashxita/LaunderLens.git && cd LaunderLens
 2. python3 -m venv .venv && source .venv/bin/activate
 3. pip install -r env/requirements.txt
-   python patches/apply_agentdojo_patch.py   # required for qwen2.5 tool calls (see patches/README.md)
+   python patches/apply_agentdojo_patch.py   # only if qwen2.5 tool calls fail to parse (needed on Windows, not on macOS); see patches/README.md
 4. Install Ollama (https://ollama.com), then: ollama pull llama3.1:8b
 5. Each terminal session:
    export OPENAI_API_KEY="ollama"
