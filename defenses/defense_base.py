@@ -44,6 +44,11 @@ class DefenseContext:
     prior_actions: list[dict] = field(default_factory=list)  # tool calls already made this run
     observations: dict[str, str] = field(default_factory=dict)  # tool_name -> raw observation text seen so far
     current_action: dict = field(default_factory=dict)       # {"tool": ..., "args": {...}} being reviewed
+    # Ordered observations made BEFORE the current action:
+    #   [{"index": i, "tool": ..., "args": {...}, "text": ...}, ...]
+    # Added for WITNESS, which must not see observations from later in the run.
+    # Optional and additive: defences that ignore it behave exactly as before.
+    observation_log: list[dict] = field(default_factory=list)
 
 
 class Defense:

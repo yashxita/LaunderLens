@@ -58,6 +58,7 @@ from authgraph import AuthGraph
 from rtbas import RTBAS
 from fides import Fides
 from camel import CaMeL
+from witness import Witness   # WITNESS (design/DEFENSE_DESIGN.md, Direction A)
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +69,7 @@ DEFENSE_REGISTRY = {
     "rtbas":     (RTBAS,     "use_ground_truth_labels"),
     "fides":     (Fides,     "use_ground_truth_labels"),
     "camel":     (CaMeL,     "use_ground_truth_provenance"),
+    "witness":   (Witness,   "use_ground_truth_slots"),
 }
 
 ALL_DEFENSES = list(DEFENSE_REGISTRY.keys())

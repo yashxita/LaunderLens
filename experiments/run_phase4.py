@@ -89,6 +89,7 @@ from authgraph import AuthGraph
 from rtbas import RTBAS
 from fides import Fides
 from camel import CaMeL
+from witness import Witness   # WITNESS (design/DEFENSE_DESIGN.md, Direction A)
 from attack_base import (
     LaunderingAttack, TaskContext,
     DEFAULT_BANKING_CTX, DEFAULT_WORKSPACE_CTX, DEFAULT_SLACK_CTX,
@@ -387,6 +388,7 @@ def run_one_variant(
         "authgraph": (AuthGraph, "use_ground_truth_plan"),
         "fides":    (Fides,   "use_ground_truth_labels"),
         "camel":    (CaMeL,   "use_ground_truth_provenance"),
+        "witness":  (Witness, "use_ground_truth_slots"),
     }
 
     for i, pt in enumerate(poisoned_traces):
@@ -543,7 +545,7 @@ def main():
     ap.add_argument("--variant", help="Specific variant (e.g. priority_billing)")
     ap.add_argument("--all-variants", action="store_true",
                     help="Run ALL variants of ALL attacks (banking only)")
-    ap.add_argument("--defense", choices=["authgraph", "rtbas", "fides", "camel"], default="authgraph",
+    ap.add_argument("--defense", choices=["authgraph", "rtbas", "fides", "camel", "witness"], default="authgraph",
                     help="Which defence to test against (default: authgraph)")
     ap.add_argument("--model-id", default="qwen2.5:14b")
     ap.add_argument("--seeds", type=int, default=3)

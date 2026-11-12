@@ -101,6 +101,29 @@ def _observations_from_trace(trace: Trace) -> dict[str, str]:
     return observations
 
 
+def _observation_log_from_trace(trace: Trace) -> list[dict]:
+    """
+    Ordered list of observations, one per action, paired the same way as
+    _observations_from_trace: the k-th 'tool' hop is the result of the k-th action.
+    Entry k is visible to the defence only when reviewing actions AFTER k.
+    """
+    log: list[dict] = []
+    actions = trace.all_actions or []
+    k = 0
+    for hop in trace.hops:
+        if hop.agent_role != "tool":
+            continue
+        action = actions[k] if k < len(actions) else {}
+        log.append({
+            "index": k,
+            "tool": action.get("tool", f"tool_{k}"),
+            "args": action.get("args", {}) or {},
+            "text": hop.output_text or "",
+        })
+        k += 1
+    return log
+
+
 def _user_prompt_from_trace(trace: Trace) -> str:
     """Pull the original user instruction (the first 'user' role hop)."""
     for hop in trace.hops:
@@ -131,6 +154,7 @@ def apply_defense_to_trace(
     tool_catalog = tool_catalog or []
     user_prompt = _user_prompt_from_trace(trace)
     observations = _observations_from_trace(trace)
+    observation_log = _observation_log_from_trace(trace)
 
     # one-time planning — skip if caller says so OR if defense already has a plan loaded
     _already_planned = getattr(defense, "_plan_ready", False)
@@ -150,6 +174,7 @@ def apply_defense_to_trace(
             prior_actions=list(prior_actions),
             observations=observations,
             current_action=action,
+            observation_log=[o for o in observation_log if o["index"] < i],
         )
         decision = defense.review(ctx)
 
