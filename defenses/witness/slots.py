@@ -143,6 +143,10 @@ _KEYWORDS: dict[str, list[tuple[str, tuple[str, ...]]]] = {
         (r"\b(calendar|event|remind\w*)\b", ("create_calendar_event",)),
     ],
 }
+# The request names a document, page, message or file the value should come from.
+_POINTS_AT_DOC = re.compile(
+    r"\b(file|document|bill|invoice|notice|letter|attachment|web\s?site|web\s?page|page|"
+    r"e-?mail|message|inbox|channel|post|note)s?\b|\.(txt|pdf|docx?|md|csv)\b|www\.|https?://", re.I)
 _PLURAL = re.compile(r"\b(each|every|all|both|them|these|those|several|multiple)\b", re.I)
 
 
@@ -195,9 +199,12 @@ def _llm_prompt(policy: SuitePolicy, user_prompt: str, read_tools: list[str]) ->
         "Decide which sink tools the request REQUIRES (omit all others) and, for "
         "each listed argument, where its value must come from:\n"
         '  "user"      - written literally in the request\n'
-        '  "trusted"   - the user\'s own account records\n'
+        '  "trusted"   - ONLY the user\'s own account records (own IBAN, own past transactions, '
+        "the user directory). Files, bills, web pages, e-mails and messages are NOT trusted.\n"
         '  "delegated" - read from a document/page/message the request points to; '
         "list the read tools that would return it in source_tools\n"
+        "An amount taken from a bill or document is \"delegated\" like the recipient. "
+        "Fetching a web page the user named (e.g. get_webpage) IS a sink to declare.\n"
         "Return exactly this JSON shape:\n"
         '{"sinks": [{"tool": "...", "max_calls": 1, "args": '
         '{"<arg>": {"source": "user|trusted|delegated", "source_tools": ["..."]}}}]}'
@@ -252,8 +259,13 @@ def llm_plan(suite: str, user_prompt: str, llm: Callable[[str, str], str],
                 continue
             tools = tuple(t for t in (a.get("source_tools") or []) if t in read_tools) \
                 if src == DELEGATED else ()
-            if policy.arg_spec(tool, arg).role == USER_ONLY:
+            role = policy.arg_spec(tool, arg).role
+            if role == USER_ONLY:
                 src, tools = USER, ()          # policy floor: never relax a user-only argument
+            elif role == IDENTITY and src == TRUSTED and _POINTS_AT_DOC.search(user_prompt or ""):
+                # The request points at a document/page/message, so "trusted" is a
+                # planner mistake. Delegated is still sound: S3-S6 decide the value.
+                src, tools, used_fallback = DELEGATED, (), True
             sp.slots[arg] = SlotSpec(arg, src, tools)
         plan.sinks[tool] = sp
     if not plan.sinks:

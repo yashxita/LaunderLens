@@ -50,7 +50,7 @@ from .ledger import CounterpartyLedger
 from .policy import (FREE_TEXT, IDENTITY, QUANTITY, REFERENCE, USER_ONLY, ArgSpec,
                      SuitePolicy, get_policy, infer_suite)
 from .recognisers import Candidate, canonical, dedupe, find_candidates, map_proposal
-from .slots import (DELEGATED, TRUSTED, USER, IntentPlan, SlotSpec, ground_truth_plan,
+from .slots import (DELEGATED, TRUSTED, USER, IntentPlan, SinkPlan, SlotSpec, ground_truth_plan,
                     heuristic_plan, llm_plan)
 from .state import Observation, TrustedState, build_trusted_state
 from .veto import LLMVeto
@@ -98,6 +98,7 @@ class WitnessConfig:
     strict_checksum: bool = False          # ISO mod-97 for IBANs (off for AgentDojo)
     trusted_seed: Optional[dict] = None    # per-suite seed (state.load_seed)
     ledger_path: Optional[str] = None      # persist pins across runs (trust on first use)
+    literal_sinks: bool = True             # undeclared sink allowed if every identity arg is user-typed
 
 
 CONFIGS: dict[str, WitnessConfig] = {
@@ -195,17 +196,19 @@ class Witness(Defense):
         if self.plan is None:
             self._compile(context.user_prompt, [a.get("tool", "") for a in context.prior_actions])
 
+        state = build_trusted_state(policy, context.user_prompt, observations,
+                                    seed=self.cfg.trusted_seed, ledger=self.ledger)
+
         # S2: control fence
         sink = self.plan.sinks.get(tool)
+        if sink is None:
+            sink = self._literal_sink(policy, tool, args, state)
         if sink is None:
             return self._finish(tool, args, [ArgVerdict("*", None, BLOCKED_CONTROL, BLOCK, "S2",
                                                         {"why": f"{tool} not declared by the intent plan"})])
         if self._calls_allowed[tool] >= sink.max_calls:
             return self._finish(tool, args, [ArgVerdict("*", None, BLOCKED_CONTROL, BLOCK, "S2",
                                                         {"why": f"call budget {sink.max_calls} for {tool} used"})])
-
-        state = build_trusted_state(policy, context.user_prompt, observations,
-                                    seed=self.cfg.trusted_seed, ledger=self.ledger)
         verdicts: list[ArgVerdict] = []
         for arg, value in args.items():
             spec = policy.arg_spec(tool, arg)
@@ -252,6 +255,13 @@ class Witness(Defense):
             return ArgVerdict(arg, value, BLOCKED_CONTROL, BLOCK, "S2",
                               {"why": f"argument {arg} has no slot in the intent plan"})
 
+        # Quantities are membership-checked against everything the agent was allowed
+        # to read; the planner's choice of source is ignored here. A weak planner
+        # labelling the bill's amount "trusted" (24/29 banking traces with qwen 14B)
+        # must not cost the payment, and an amount cannot redirect who is paid.
+        if spec.role == QUANTITY and not cfg.strict_quantities:
+            return self._quantity(arg, value, vtype, policy, state, observations)
+
         if slot.source == USER:
             return ArgVerdict(arg, value, BLOCKED_UNSUPPORTED, BLOCK, "S1",
                               {"why": "slot is user-sourced but the value is not in the prompt"})
@@ -285,9 +295,6 @@ class Witness(Defense):
                                   {**detail, "why": "proposed value is not a candidate in the delegated source"})
             own = Candidate(canonical(value, vtype), str(value), vtype, "agent", -1)
             C, hits = C + [own], [own]
-
-        if vtype == "amount" and spec.role == QUANTITY and not cfg.strict_quantities:
-            return ArgVerdict(arg, value, ENDORSED_PRESENT, ALLOW, "S3", detail)
 
         if not cfg.uniqueness:
             return ArgVerdict(arg, value, ENDORSED_ANY, ALLOW, "S3", detail)
@@ -332,6 +339,48 @@ class Witness(Defense):
         return self._confirm(tool, arg, value, vtype, pool, chosen, observations, detail)
 
     # ------------------------------------------------------------------ helpers
+    def _quantity(self, arg, value, vtype, policy: SuitePolicy, state: TrustedState,
+                  observations: list[Observation]) -> ArgVerdict:
+        v = canonical(value, vtype)
+        if state.witness_of(vtype, v):
+            return ArgVerdict(arg, value, ENDORSED_TRUSTED, ALLOW, "S5")
+        docs = observations if self.cfg.delegation else \
+            [o for o in observations if o.tool in policy.trusted_tools]
+        C = dedupe(c for d in docs for c in find_candidates(d.text, vtype, d.tool, d.index))
+        if map_proposal(value, vtype, C):
+            return ArgVerdict(arg, value, ENDORSED_PRESENT, ALLOW, "S3",
+                              {"sources": sorted({d.tool for d in docs})})
+        return ArgVerdict(arg, value, BLOCKED_UNSUPPORTED, BLOCK, "S3",
+                          {"why": "amount does not appear in anything the agent read",
+                           "candidates": [c.raw for c in C]})
+
+    def _literal_sink(self, policy: SuitePolicy, tool: str, args: dict,
+                      state: TrustedState) -> Optional[SinkPlan]:
+        """
+        A sink the planner did not declare is still authorised when EVERY identity
+        argument is a value the user typed (e.g. "her website: www.dora-website.com"
+        -> get_webpage(url=that)). The user named the destination, so no document can
+        have steered it. Fixes the LLM planner dropping Slack get_webpage. Budget 1.
+        """
+        if not self.cfg.literal_sinks:
+            return None
+        ident = [(a, s) for a, s in policy.sinks.get(tool, {}).items() if s.role == IDENTITY]
+        if not ident:
+            return None
+        for arg, spec in ident:
+            value = args.get(arg)
+            items = value if isinstance(value, (list, tuple)) else [value]
+            items = [i for i in items if i not in (None, "")]
+            if not items or any(canonical(i, spec.vtype) not in state.prompt_values.get(spec.vtype, set())
+                                for i in items):
+                return None
+        sp = SinkPlan(tool, 1, {a: SlotSpec(a, USER) for a, _ in ident})
+        for a, s in policy.sinks.get(tool, {}).items():
+            if s.role == QUANTITY:
+                sp.slots[a] = SlotSpec(a, DELEGATED, ())
+        self.plan.sinks[tool] = sp       # later calls share the same budget
+        return sp
+
     def _confirm(self, tool, arg, value, vtype, pool, chosen, observations, detail) -> ArgVerdict:
         texts = {o.index: o.text for o in observations}
         idx = self.confirm.ask(tool, arg, vtype, pool, texts)

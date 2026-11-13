@@ -241,6 +241,8 @@ def main():
     ap.add_argument("--trusted-seed", default=None, help="JSON from experiments/seed_trusted_state.py")
     ap.add_argument("--with-llm", action="store_true", help="enable LLM configs (veto) / --slots llm")
     ap.add_argument("--model-id", default="qwen2.5:14b")
+    ap.add_argument("--attacks", nargs="*", default=None,
+                    help="only score result files of these attacks, e.g. competing_value")
     ap.add_argument("--no-extra-clean", action="store_true",
                     help="only use clean runs referenced by result files (default also scans logs/)")
     args = ap.parse_args()
@@ -286,6 +288,9 @@ def main():
             return None
         return traces[run_id]
 
+    if args.attacks:
+        results = [(f, d) for f, d in results if (d.get("attack") or {}).get("name") in args.attacks]
+        print(f"  filtered to attacks {args.attacks}: {len(results)} files")
     for fname, d in results:
         cfg = d.get("config", {})
         suite, task = cfg.get("suite") or d.get("suite"), cfg.get("task")
@@ -350,7 +355,7 @@ def main():
                 continue
             s = score_attack(out, suite, attacker_values(t, clean, suite), legit_actions(clean, suite),
                              out.defense_decisions)
-            g = groups[(suite, m["attack"], m["variant"])]
+            g = groups[(suite, m["task"], m["attack"], m["variant"])]
             for k, v in (("n", 1), ("attempted", s["attempted"]), ("att_allowed", s["attacker_allowed"]),
                          ("legit_attempted", s["legit_attempted"]), ("legit_allowed", s["legit_allowed"]),
                          ("escalated", s["escalated"])):
@@ -468,8 +473,8 @@ def main():
                  f"{_fmt(_rate(b['lis_honest'], b['lis_judged']))} | "
                  f"{_fmt(base_util.get(dname))} |")
     L += ["", "## 3. Per attack (witness / witness_assisted / ablate_uniqueness / ablate_delegation)", "",
-          "| suite | attack | variant | n | witness ASR-def / UA | assisted ASR-def / UA | no-uniq ASR-def | no-deleg UA |",
-          "|---|---|---|---|---|---|---|---|"]
+          "| suite | task | attack | variant | n | witness ASR-def / UA | assisted ASR-def / UA | no-uniq ASR-def | no-deleg UA |",
+          "|---|---|---|---|---|---|---|---|---|"]
     keys = sorted({k for c in configs for k in agg[c]["groups"]})
 
     def cell(c, k, what):
@@ -481,9 +486,9 @@ def main():
         return _fmt(_rate(g.get("legit_allowed", 0), g.get("n", 0)))
 
     for k in keys:
-        suite, atk, var = k.split("|")
+        suite, task, atk, var = k.split("|")
         n = agg[configs[0]]["groups"].get(k, {}).get("n", 0)
-        L.append(f"| {suite} | {atk} | {var} | {n} | {cell('witness', k, 'asr')} / {cell('witness', k, 'ua')} "
+        L.append(f"| {suite} | {task} | {atk} | {var} | {n} | {cell('witness', k, 'asr')} / {cell('witness', k, 'ua')} "
                  f"| {cell('witness_assisted', k, 'asr')} / {cell('witness_assisted', k, 'ua')} "
                  f"| {cell('ablate_uniqueness', k, 'asr')} | {cell('ablate_delegation', k, 'ua')} |")
     L += ["", "## 4. Label distribution on sink calls", ""]
