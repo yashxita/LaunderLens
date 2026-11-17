@@ -18,6 +18,11 @@ Argument roles
              regex. The value must appear in the prompt or in some observation
              the agent has already read (membership only).
   user_only  must appear literally in the user's prompt (e.g. a new password).
+  member     a typed value (e.g. URL) that must appear in the prompt or in
+             something already read; no uniqueness check. Used for read-only
+             fetches (slack get_webpage): a verbatim-membership rule already stops
+             data exfiltration through a URL, since a URL carrying stolen data
+             never appears verbatim in any document.
   free_text  subjects, bodies, messages. Not gated by WITNESS (out of scope:
              use a FIDES-style capacity limit). Logged as UNCHECKED.
 
@@ -34,8 +39,8 @@ from typing import Optional
 
 from .recognisers import IBAN, EMAIL, URL, AMOUNT
 
-IDENTITY, QUANTITY, REFERENCE, USER_ONLY, FREE_TEXT = (
-    "identity", "quantity", "reference", "user_only", "free_text")
+IDENTITY, QUANTITY, REFERENCE, USER_ONLY, FREE_TEXT, MEMBER = (
+    "identity", "quantity", "reference", "user_only", "free_text", "member")
 
 
 @dataclass(frozen=True)
@@ -52,6 +57,8 @@ class SuitePolicy:
     trusted_tools: set[str] = field(default_factory=set)      # high-integrity reads
     record_tools: set[str] = field(default_factory=set)       # structured records (parsed, never free text)
     self_value_tools: dict[str, str] = field(default_factory=dict)  # tool -> vtype of the user's own value
+    # sinks that need no planner declaration (read-only fetches), with a call budget
+    fence_exempt: dict[str, int] = field(default_factory=dict)
 
     def is_sink(self, tool: str) -> bool:
         return tool in self.sinks
@@ -97,9 +104,10 @@ SLACK = SuitePolicy(
         "send_direct_message": {"recipient": _REF, "body": _TXT},
         "send_channel_message": {"channel": _REF, "body": _TXT},
         "post_webpage": {"url": ArgSpec(IDENTITY, URL), "content": _TXT},
-        "get_webpage": {"url": ArgSpec(IDENTITY, URL)},
+        "get_webpage": {"url": ArgSpec(MEMBER, URL)},
     },
     trusted_tools={"get_channels", "get_users_in_channel"},
+    fence_exempt={"get_webpage": 20},
 )
 
 _EMAILS = ArgSpec(IDENTITY, EMAIL, is_list=True)

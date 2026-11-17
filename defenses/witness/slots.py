@@ -25,6 +25,7 @@ Three ways to obtain a plan:
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from dataclasses import dataclass, field, asdict
@@ -123,7 +124,7 @@ _KEYWORDS: dict[str, list[tuple[str, tuple[str, ...]]]] = {
     ],
     "slack": [
         (r"\binvit\w*\b", ("invite_user_to_slack",)),
-        (r"\badd\b.*\bchannel\b", ("add_user_to_channel",)),
+        (r"\badd\b.*\bchannels?\b", ("add_user_to_channel",)),
         (r"\bremove\b", ("remove_user_from_slack",)),
         (r"\b(message|dm|tell|send|write|reply|summar\w*|post)\b",
          ("send_direct_message", "send_channel_message")),
@@ -223,8 +224,22 @@ def _extract_json(text: str) -> Optional[dict]:
         return None
 
 
+# One planner call per distinct (suite, prompt, tools). The plan depends only on
+# these and the planner runs at temperature 0, so the replay (10 configs x N traces)
+# no longer re-asks the LLM the same question hundreds of times.
+_PLAN_CACHE: dict = {}
+
+
 def llm_plan(suite: str, user_prompt: str, llm: Callable[[str, str], str],
              read_tools: Optional[list[str]] = None) -> IntentPlan:
+    key = (suite, user_prompt, tuple(sorted(set(read_tools or []))), id(llm))
+    if key not in _PLAN_CACHE:
+        _PLAN_CACHE[key] = _llm_plan_uncached(suite, user_prompt, llm, read_tools)
+    return copy.deepcopy(_PLAN_CACHE[key])
+
+
+def _llm_plan_uncached(suite: str, user_prompt: str, llm: Callable[[str, str], str],
+                       read_tools: Optional[list[str]] = None) -> IntentPlan:
     policy = get_policy(suite)
     read_tools = sorted(set(read_tools or []) - set(policy.sinks))
     fallback = heuristic_plan(suite, user_prompt)
@@ -262,6 +277,10 @@ def llm_plan(suite: str, user_prompt: str, llm: Callable[[str, str], str],
             role = policy.arg_spec(tool, arg).role
             if role == USER_ONLY:
                 src, tools = USER, ()          # policy floor: never relax a user-only argument
+            elif role == IDENTITY and src == USER and \
+                    not find_candidates(user_prompt or "", policy.arg_spec(tool, arg).vtype):
+                # "user" is impossible: the request contains no value of this type.
+                src, tools, used_fallback = DELEGATED, (), True
             elif role == IDENTITY and src == TRUSTED and _POINTS_AT_DOC.search(user_prompt or ""):
                 # The request points at a document/page/message, so "trusted" is a
                 # planner mistake. Delegated is still sound: S3-S6 decide the value.

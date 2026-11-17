@@ -47,7 +47,7 @@ from defense_base import Defense, DefenseContext, ActionDecision  # noqa: E402
 
 from .confirm import ABSTAIN, ORACLE, ConfirmationPolicy
 from .ledger import CounterpartyLedger
-from .policy import (FREE_TEXT, IDENTITY, QUANTITY, REFERENCE, USER_ONLY, ArgSpec,
+from .policy import (FREE_TEXT, IDENTITY, MEMBER, QUANTITY, REFERENCE, USER_ONLY, ArgSpec,
                      SuitePolicy, get_policy, infer_suite)
 from .recognisers import Candidate, canonical, dedupe, find_candidates, map_proposal
 from .slots import (DELEGATED, TRUSTED, USER, IntentPlan, SinkPlan, SlotSpec, ground_truth_plan,
@@ -201,6 +201,11 @@ class Witness(Defense):
 
         # S2: control fence
         sink = self.plan.sinks.get(tool)
+        if tool in policy.fence_exempt:
+            if sink is None:
+                sink = SinkPlan(tool, policy.fence_exempt[tool], {})
+                self.plan.sinks[tool] = sink
+            sink.max_calls = max(sink.max_calls, policy.fence_exempt[tool])
         if sink is None:
             sink = self._literal_sink(policy, tool, args, state)
         if sink is None:
@@ -249,6 +254,9 @@ class Witness(Defense):
                               ALLOW if ok else BLOCK, "reference",
                               {} if ok else {"why": "reference not seen in prompt or any observation"})
 
+        if spec.role == MEMBER:
+            return self._membership(arg, value, spec.vtype, observations)
+
         # identity / quantity from here on
         vtype = spec.vtype
         if slot is None:
@@ -261,6 +269,13 @@ class Witness(Defense):
         # must not cost the payment, and an amount cannot redirect who is paid.
         if spec.role == QUANTITY and not cfg.strict_quantities:
             return self._quantity(arg, value, vtype, policy, state, observations)
+        if spec.role == QUANTITY:
+            # strict quantities: full uniqueness pipeline, still ignoring a planner's
+            # "user"/"trusted" label for an amount (the round-1 qwen planner bug).
+            if state.witness_of(vtype, canonical(value, vtype)):
+                return ArgVerdict(arg, value, ENDORSED_TRUSTED, ALLOW, "S5")
+            keep = slot.source_tools if (slot is not None and slot.source == DELEGATED) else ()
+            slot = SlotSpec(arg, DELEGATED, keep)
 
         if slot.source == USER:
             return ArgVerdict(arg, value, BLOCKED_UNSUPPORTED, BLOCK, "S1",
@@ -288,6 +303,15 @@ class Witness(Defense):
         C = dedupe(c for d in docs for c in find_candidates(d.text, vtype, d.tool, d.index,
                                                             strict_checksum=cfg.strict_checksum))
         hits = map_proposal(value, vtype, C)
+        if not hits and slot.source_tools and self.plan.origin != "ground_truth":
+            # A planner may name the wrong document (qwen pointed Slack task 11's
+            # e-mail at the inbox, not the web page). Widen to every untrusted read:
+            # that is the heuristic default and S4-S6 still decide among candidates.
+            wide = self._delegated_docs(SlotSpec(arg, DELEGATED, ()), policy, observations)
+            Cw = dedupe(c for d in wide for c in find_candidates(d.text, vtype, d.tool, d.index,
+                                                                 strict_checksum=cfg.strict_checksum))
+            if map_proposal(value, vtype, Cw):
+                docs, C, hits = wide, Cw, map_proposal(value, vtype, Cw)
         detail = {"candidates": [c.raw for c in C], "sources": sorted({d.tool for d in docs})}
         if not hits:
             if cfg.fail_closed:
@@ -339,6 +363,13 @@ class Witness(Defense):
         return self._confirm(tool, arg, value, vtype, pool, chosen, observations, detail)
 
     # ------------------------------------------------------------------ helpers
+    def _membership(self, arg, value, vtype, observations: list[Observation]) -> ArgVerdict:
+        C = dedupe(c for o in observations for c in find_candidates(o.text, vtype, o.tool, o.index))
+        if map_proposal(value, vtype, C):
+            return ArgVerdict(arg, value, ENDORSED_PRESENT, ALLOW, "S3")
+        return ArgVerdict(arg, value, BLOCKED_UNSUPPORTED, BLOCK, "S3",
+                          {"why": "value is neither typed by the user nor in anything read"})
+
     def _quantity(self, arg, value, vtype, policy: SuitePolicy, state: TrustedState,
                   observations: list[Observation]) -> ArgVerdict:
         v = canonical(value, vtype)

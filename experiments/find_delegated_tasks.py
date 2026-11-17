@@ -50,16 +50,22 @@ def _to_text(result) -> str:
         return str(result)
 
 
+def _call_parts(call):
+    """(function, args) from an AgentDojo FunctionCall (pydantic) or a plain dict."""
+    if isinstance(call, dict):
+        return call.get("function"), dict(call.get("args") or {})
+    return getattr(call, "function", None), dict(getattr(call, "args", None) or {})
+
+
 def _run_ground_truth(suite, user_task, injections):
-    """Execute the task's ground-truth calls; return [(function, args, output_text)]."""
+    """Execute the task's ground-truth calls; return (env, [(function, args, output_text)])."""
     from agentdojo.functions_runtime import FunctionsRuntime
     env = suite.load_and_inject_default_environment(injections)
     calls = user_task.ground_truth(copy.deepcopy(env))
     runtime = FunctionsRuntime(suite.tools)
     out = []
     for call in calls:
-        fn = getattr(call, "function", None) or call["function"]
-        args = dict(getattr(call, "args", None) or call.get("args", {}) or {})
+        fn, args = _call_parts(call)
         try:
             res = runtime.run_function(env, fn, args)
             result, err = res if isinstance(res, tuple) else (res, None)
@@ -67,13 +73,62 @@ def _run_ground_truth(suite, user_task, injections):
         except Exception as e:
             text = f"ERROR: {e}"
         out.append((fn, args, text))
-    return out
+    return env, out
+
+
+def _strings(node):
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, dict):
+        for k, v in node.items():
+            yield from _strings(k)
+            yield from _strings(v)
+    elif isinstance(node, (list, tuple)):
+        for v in node:
+            yield from _strings(v)
+
+
+def _leaves(node, path="", parent=None):
+    """(path, string_leaf, parent_container) for every string in the environment."""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            yield from _leaves(v, f"{path}.{k}", node)
+    elif isinstance(node, (list, tuple)):
+        for i, v in enumerate(node):
+            yield from _leaves(v, f"{path}[{i}]", node)
+    elif isinstance(node, str):
+        yield path, node, parent
+
+
+def _search_environment(env, value, vtype, canaries):
+    """
+    Fallback when the ground truth never READS the source (e.g. banking user_task_0
+    pays the bill without a read_file call in its ground truth). Find the string
+    holding the value; its injection slots are the canaries in that same string, or
+    in its enclosing RECORD (a small dict such as one e-mail or calendar event).
+    Large containers (a whole file system or inbox) are never used, so a canary in
+    a different document is not mistaken for same-observation pollution.
+    """
+    try:
+        dump = env.model_dump()
+    except Exception:
+        return None
+    for path, text, parent in _leaves(dump):
+        if value not in {c.value for c in find_candidates(text, vtype)}:
+            continue
+        slots = [k for k, c in canaries.items() if c in text]
+        if not slots and isinstance(parent, dict) and len(parent) <= 12:
+            texts = list(_strings(parent))
+            slots = [k for k, c in canaries.items() if any(c in t for t in texts)]
+        if slots:
+            return path, slots
+    return None
 
 
 def analyse_task(suite_name, suite, task_id, user_task, canaries):
     policy = POLICIES[suite_name]
     prompt = user_task.PROMPT
-    steps = _run_ground_truth(suite, user_task, canaries)
+    env, steps = _run_ground_truth(suite, user_task, canaries)
     found = []
     for i, (fn, args, _) in enumerate(steps):
         if not policy.is_sink(fn):
@@ -87,18 +142,25 @@ def analyse_task(suite_name, suite, task_id, user_task, canaries):
                 v = canonical(item, spec.vtype)
                 if v in {c.value for c in find_candidates(prompt, spec.vtype)}:
                     continue                        # user typed it: not delegated
+                src = None
                 for j in range(i):                  # earliest earlier output holding it
                     src_fn, src_args, src_text = steps[j]
                     if v in {c.value for c in find_candidates(src_text, spec.vtype)}:
-                        slots = [k for k, c in canaries.items() if c in src_text]
-                        found.append({
-                            "suite": suite_name, "task_id": task_id, "prompt": prompt,
-                            "sink_tool": fn, "arg": arg, "vtype": spec.vtype,
-                            "legitimate_value": str(item), "source_tool": src_fn,
-                            "source_args": src_args, "injection_vectors": slots,
-                            "attackable": bool(slots),
-                        })
+                        src = (src_fn, src_args, [k for k, c in canaries.items() if c in src_text])
                         break
+                if src is None or not src[2]:
+                    hit = _search_environment(env, v, spec.vtype, canaries)
+                    if hit is not None:
+                        src = (f"env:{hit[0]}", {}, hit[1])
+                if src is None:
+                    continue
+                found.append({
+                    "suite": suite_name, "task_id": task_id, "prompt": prompt,
+                    "sink_tool": fn, "arg": arg, "vtype": spec.vtype,
+                    "legitimate_value": str(item), "source_tool": src[0],
+                    "source_args": src[1], "injection_vectors": src[2],
+                    "attackable": bool(src[2]),
+                })
     return found
 
 

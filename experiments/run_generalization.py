@@ -49,6 +49,30 @@ def tool_catalog(suite_name: str, version: str) -> list[dict]:
     return cat
 
 
+def apply_baselines(poisoned, names, llm, catalog) -> list[dict]:
+    """Run the old defences (their OWN planners: no ground truth exists for new tasks)."""
+    from apply_defense import apply_defense_to_trace
+    from authgraph import AuthGraph
+    from rtbas import RTBAS
+    from fides import Fides
+    from camel import CaMeL
+    classes = {"authgraph": AuthGraph, "rtbas": RTBAS, "fides": Fides, "camel": CaMeL}
+    out = []
+    for name in names:
+        for t in poisoned:
+            try:
+                d = classes[name](llm=llm)
+                prompt = next((h.output_text for h in t.hops if h.agent_role == "user"), "")
+                d.setup(prompt, catalog)
+                tc = copy.deepcopy(t)
+                apply_defense_to_trace(tc, d, catalog, skip_setup=True)
+                out.append({"run_id": t.run_id, "defense": name, "planner": "own (no ground truth)",
+                            "decisions": tc.defense_decisions})
+            except Exception as e:
+                print(f"  baseline {name} failed on {t.run_id}: {e}")
+    return out
+
+
 def pick_tasks(path: str, suites, tasks, max_tasks):
     with open(path, encoding="utf-8") as f:
         rows = json.load(f)["tasks"]
@@ -102,17 +126,10 @@ def main():
     from trace import Trace
     from runner import run_one
     from counterfactual import run_counterfactual_oracle, DEFAULT_FILLERS
-    from apply_defense import apply_defense_to_trace, make_local_llm
+    from apply_defense import make_local_llm
 
     os.makedirs(args.results_dir, exist_ok=True)
     llm = make_local_llm(model_id=args.model_id) if args.baselines else None
-    baseline_cls = {}
-    if args.baselines:
-        from authgraph import AuthGraph
-        from rtbas import RTBAS
-        from fides import Fides
-        from camel import CaMeL
-        baseline_cls = {"authgraph": AuthGraph, "rtbas": RTBAS, "fides": Fides, "camel": CaMeL}
 
     for r in rows:
         suite, task = r["suite"], r["task_id"]
@@ -171,19 +188,8 @@ def main():
                         summary["oracle_verdicts"].append(v.to_dict())
                     except Exception as e:
                         summary["oracle_verdicts"].append({"poisoned_run_id": t.run_id, "error": str(e)})
-            for name in args.baselines:
-                for t in poisoned:
-                    try:
-                        d = baseline_cls[name](llm=llm)
-                        prompt = next((h.output_text for h in t.hops if h.agent_role == "user"), "")
-                        d.setup(prompt, catalog)
-                        tc = copy.deepcopy(t)
-                        apply_defense_to_trace(tc, d, catalog, skip_setup=True)
-                        summary["defense_results"].append({"run_id": t.run_id, "defense": name,
-                                                           "planner": "own (no ground truth)",
-                                                           "decisions": tc.defense_decisions})
-                    except Exception as e:
-                        print(f"  baseline {name} failed on {t.run_id}: {e}")
+            if args.baselines:
+                summary["defense_results"] += apply_baselines(poisoned, args.baselines, llm, catalog)
             out = os.path.join(args.results_dir, summary["experiment_id"] + ".json")
             with open(out, "w", encoding="utf-8") as f:
                 json.dump(summary, f, indent=2, default=str)
