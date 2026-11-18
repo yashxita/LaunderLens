@@ -92,7 +92,8 @@ class WitnessConfig:
     elimination: bool = True               # S4
     corroboration: bool = True             # S5
     fail_closed: bool = True               # S3 membership requirement
-    strict_quantities: bool = False        # amounts get the identity pipeline
+    strict_quantities: bool = True         # amounts get the identity pipeline (round 3: no utility cost,
+                                           # closes the inflated-amount adaptive attack A9)
     require_known_counterparty: bool = False  # a unique identity still needs trusted evidence
     veto: bool = False                     # optional LLM veto (needs llm)
     strict_checksum: bool = False          # ISO mod-97 for IBANs (off for AgentDojo)
@@ -107,7 +108,8 @@ CONFIGS: dict[str, WitnessConfig] = {
     "witness_veto": WitnessConfig(name="witness_veto", veto=True),
     "witness_known_counterparty": WitnessConfig(name="witness_known_counterparty",
                                                 require_known_counterparty=True),
-    "witness_strict_qty": WitnessConfig(name="witness_strict_qty", strict_quantities=True),
+    "witness_strict_qty": WitnessConfig(name="witness_strict_qty", strict_quantities=True),   # = default
+    "witness_lenient_qty": WitnessConfig(name="witness_lenient_qty", strict_quantities=False),
     # ablations that reproduce prior design points
     "ablate_uniqueness": WitnessConfig(name="ablate_uniqueness", uniqueness=False),     # ~AuthGraph/AuthorityFlow
     "ablate_delegation": WitnessConfig(name="ablate_delegation", delegation=False),     # ~ROPE/CaMeL

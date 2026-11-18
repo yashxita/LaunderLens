@@ -148,7 +148,11 @@ _KEYWORDS: dict[str, list[tuple[str, tuple[str, ...]]]] = {
 _POINTS_AT_DOC = re.compile(
     r"\b(file|document|bill|invoice|notice|letter|attachment|web\s?site|web\s?page|page|"
     r"e-?mail|message|inbox|channel|post|note)s?\b|\.(txt|pdf|docx?|md|csv)\b|www\.|https?://", re.I)
-_PLURAL = re.compile(r"\b(each|every|all|both|them|these|those|several|multiple)\b", re.I)
+# Plural cues raise the call budget: quantifiers, or a plural sink object
+# ("add her to the necessary channels", "update my standing orders").
+_PLURAL = re.compile(r"\b(each|every|all|both|them|these|those|several|multiple|"
+                     r"channels|orders|transactions|payments|transfers|users|people|"
+                     r"recipients|participants|emails|messages|invitations)\b", re.I)
 
 
 def heuristic_plan(suite: str, user_prompt: str) -> IntentPlan:

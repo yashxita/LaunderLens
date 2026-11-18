@@ -50,23 +50,17 @@ def steps(model, max_tasks):
     ]
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--model-id", default="qwen2.5:14b")
-    ap.add_argument("--max-tasks", type=int, default=0, help="cap banking tasks in step 4")
-    ap.add_argument("--from", dest="start", type=int, default=1)
-    ap.add_argument("--skip-agent", action="store_true")
-    args = ap.parse_args()
-
+def run(step_list, tag, start=1, skip_agent=False):
+    """Run (n, title, cmd, needs_agent) steps in order; log everything; never stop early."""
     os.chdir(_ROOT)
     os.makedirs("experiments/results", exist_ok=True)
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_path = os.path.join("experiments", "results", f"round3_log_{stamp}.txt")
+    log_path = os.path.join("experiments", "results", f"{tag}_log_{stamp}.txt")
     summary = []
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
     with open(log_path, "w", encoding="utf-8") as log:
-        for n, title, cmd, agent in steps(args.model_id, args.max_tasks):
-            if n < args.start or (agent and args.skip_agent):
+        for n, title, cmd, agent in step_list:
+            if n < start or (agent and skip_agent):
                 continue
             head = f"\n{'=' * 72}\n STEP {n}: {title}\n $ {' '.join(cmd)}\n{'=' * 72}\n"
             print(head, end="")
@@ -85,6 +79,16 @@ def main():
         tail = "\n\nSUMMARY\n" + "\n".join(summary) + f"\n\nfull log: {log_path}\n"
         print(tail)
         log.write(tail)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--model-id", default="qwen2.5:14b")
+    ap.add_argument("--max-tasks", type=int, default=0, help="cap banking tasks in step 4")
+    ap.add_argument("--from", dest="start", type=int, default=1)
+    ap.add_argument("--skip-agent", action="store_true")
+    args = ap.parse_args()
+    run(steps(args.model_id, args.max_tasks), "round3", args.start, args.skip_agent)
 
 
 if __name__ == "__main__":

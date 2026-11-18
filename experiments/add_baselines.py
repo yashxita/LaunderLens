@@ -5,7 +5,11 @@ result files (e.g. the round-2 Slack/workspace runs), with no new agent runs.
 Each defence uses its own planner (no ground truth exists for these tasks). Only
 LLM calls for the defences' planners/checkers; the agent is not re-run.
 
+--clean scores the same defences on each file's CLEAN run instead, so the paper
+can report their utility cost on the SAME tasks (stored as `clean_defense_results`).
+
     python experiments/add_baselines.py
+    python experiments/add_baselines.py --clean
     python experiments/add_baselines.py --defenses authgraph rtbas --suites slack
 """
 
@@ -36,7 +40,10 @@ def main():
     ap.add_argument("--version", default="v1")
     ap.add_argument("--results-dir", default=os.path.join(_ROOT, "experiments", "results"))
     ap.add_argument("--logs-dir", default=os.path.join(_ROOT, "logs"))
+    ap.add_argument("--clean", action="store_true", help="score the clean runs (utility cost)")
     args = ap.parse_args()
+    key = "clean_defense_results" if args.clean else "defense_results"
+    clean_cache: dict = {}            # clean run_id -> results (shared by the 3 variant files)
 
     from trace import Trace
     from apply_defense import make_local_llm
@@ -50,21 +57,31 @@ def main():
         suite = d["config"]["suite"]
         if args.suites and suite not in args.suites:
             continue
-        have = {(r.get("defense"), r.get("run_id")) for r in d.get("defense_results", [])}
+        have = {(r.get("defense"), r.get("run_id")) for r in d.get(key, [])}
         todo = [n for n in args.defenses if not any(k[0] == n for k in have)]
         if not todo:
             continue
-        poisoned = []
-        for pr in d.get("poisoned_runs", []):
+        runs = [d.get("clean_run", {})] if args.clean else d.get("poisoned_runs", [])
+        traces = []
+        for pr in runs:
+            if not pr.get("run_id"):
+                continue
             p = resolve_trace(pr.get("path"), pr["run_id"], args.logs_dir)
             if p:
-                poisoned.append(Trace.load(p))
-        if not poisoned:
+                traces.append(Trace.load(p))
+        if not traces:
             print(f"  [skip] traces not found for {os.path.basename(f)}")
             continue
         if suite not in catalogs:
             catalogs[suite] = tool_catalog(suite, args.version)
-        d.setdefault("defense_results", []).extend(apply_baselines(poisoned, todo, llm, catalogs[suite]))
+        if args.clean:
+            rid = traces[0].run_id
+            if rid not in clean_cache:
+                clean_cache[rid] = apply_baselines(traces, args.defenses, llm, catalogs[suite])
+            new = [r for r in clean_cache[rid] if r["defense"] in todo]
+        else:
+            new = apply_baselines(traces, todo, llm, catalogs[suite])
+        d.setdefault(key, []).extend(new)
         with open(f, "w", encoding="utf-8") as fh:
             json.dump(d, fh, indent=2, default=str)
         print(f"  + {todo} -> {os.path.basename(f)}")
