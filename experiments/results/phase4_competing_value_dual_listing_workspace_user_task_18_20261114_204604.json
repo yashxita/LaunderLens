@@ -48,6 +48,55 @@
     }
   ],
   "oracle_verdicts": [],
-  "defense_results": [],
+  "defense_results": [
+    {
+      "run_id": "2f0684d8-d463-47b2-9a85-3a9dddd2c255",
+      "defense": "authgraph",
+      "planner": "own (no ground truth)",
+      "decisions": []
+    },
+    {
+      "run_id": "d0185a6c-1c85-4d1f-8d5b-582e2cd1a293",
+      "defense": "authgraph",
+      "planner": "own (no ground truth)",
+      "decisions": []
+    },
+    {
+      "run_id": "2f0684d8-d463-47b2-9a85-3a9dddd2c255",
+      "defense": "rtbas",
+      "planner": "own (no ground truth)",
+      "decisions": []
+    },
+    {
+      "run_id": "d0185a6c-1c85-4d1f-8d5b-582e2cd1a293",
+      "defense": "rtbas",
+      "planner": "own (no ground truth)",
+      "decisions": []
+    },
+    {
+      "run_id": "2f0684d8-d463-47b2-9a85-3a9dddd2c255",
+      "defense": "fides",
+      "planner": "own (no ground truth)",
+      "decisions": []
+    },
+    {
+      "run_id": "d0185a6c-1c85-4d1f-8d5b-582e2cd1a293",
+      "defense": "fides",
+      "planner": "own (no ground truth)",
+      "decisions": []
+    },
+    {
+      "run_id": "2f0684d8-d463-47b2-9a85-3a9dddd2c255",
+      "defense": "camel",
+      "planner": "own (no ground truth)",
+      "decisions": []
+    },
+    {
+      "run_id": "d0185a6c-1c85-4d1f-8d5b-582e2cd1a293",
+      "defense": "camel",
+      "planner": "own (no ground truth)",
+      "decisions": []
+    }
+  ],
   "metrics": {}
 }
