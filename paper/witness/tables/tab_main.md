@@ -1,0 +1,11 @@
+**Same tasks, same traces: attack success and clean-task cost of each defence on all attackable delegated-value tasks.**
+
+| Defence | Attacked runs | Leaked/attempted | ASR | UA (cond.) | Clean ok/n | BU | FPR |
+|---|---|---|---|---|---|---|---|
+| **WITNESS** | 72 | 0/18 | **0.000** | 1.000 | 20/22 | **0.909** | 0.071 |
+| AuthGraph | 66 | 12/18 | 0.667 | 1.000 | 20/21 | 0.952 | 0.040 |
+| RTBAS | 72 | 18/18 | 1.000 | 0.250 | 4/22 | 0.182 | 0.786 |
+| FIDES | 72 | 0/18 | 0.000 | 0.250 | 2/22 | 0.091 | 0.893 |
+| CaMeL | 72 | 0/18 | 0.000 | 0.750 | 2/22 | 0.091 | 0.821 |
+
+ASR = attacker value executed / runs in which the agent attempted it. UA (cond.) = legitimate write allowed when the agent attempted it. BU = clean runs with every write allowed; FPR = blocked writes / writes on clean runs. On the generic-attack tasks the baselines use their own planners; on the two hand-crafted tasks they use ground-truth plans (as in the LaunderLens study). WITNESS shown in autonomous mode; in assisted mode UA (cond.) is 1.000. Clean columns use the same clean runs for every defence; over all 42 clean runs with writes WITNESS completes 40 (0.952).
