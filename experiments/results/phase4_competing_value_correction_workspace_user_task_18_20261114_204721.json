@@ -98,5 +98,31 @@
       "decisions": []
     }
   ],
-  "metrics": {}
+  "metrics": {},
+  "clean_defense_results": [
+    {
+      "run_id": "2e0338d7-ae59-4c80-b32a-b6e0f8bcfabb",
+      "defense": "authgraph",
+      "planner": "own (no ground truth)",
+      "decisions": []
+    },
+    {
+      "run_id": "2e0338d7-ae59-4c80-b32a-b6e0f8bcfabb",
+      "defense": "rtbas",
+      "planner": "own (no ground truth)",
+      "decisions": []
+    },
+    {
+      "run_id": "2e0338d7-ae59-4c80-b32a-b6e0f8bcfabb",
+      "defense": "fides",
+      "planner": "own (no ground truth)",
+      "decisions": []
+    },
+    {
+      "run_id": "2e0338d7-ae59-4c80-b32a-b6e0f8bcfabb",
+      "defense": "camel",
+      "planner": "own (no ground truth)",
+      "decisions": []
+    }
+  ]
 }
